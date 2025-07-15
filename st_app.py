@@ -148,11 +148,10 @@ def activity_list_view():
 
         st.pydeck_chart(pdk.Deck(
             map_style="mapbox://styles/mapbox/light-v9",
-            mapbox_key=MAPBOX_API_KEY,
             initial_view_state=view_state,
             layers=[layer],
             tooltip=tooltip
-        ))
+        ), mapbox_key=MAPBOX_API_KEY)
     else:
         st.info("No activities with valid locations to display on the map.")
 
