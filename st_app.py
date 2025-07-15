@@ -3,6 +3,10 @@ import json
 from datetime import datetime, timedelta
 import uuid
 import pandas as pd
+import pydeck as pdk
+
+# --- Mapbox Configuration ---
+MAPBOX_API_KEY = "pk.eyJ1IjoidnIwMG4tbnljc2J1cyIsImEiOiJjbDB5cHhoeHgxcmEyM2ptdXVkczk1M2xlIn0.qq6o-6TMurwke-t1eyetBw"
 
 # --- Initial Mock Data ---
 # This data will populate the app on first run and will reset on refresh.
@@ -101,7 +105,59 @@ def activity_list_view():
     user = st.session_state['logged_in_user']
     activities = st.session_state.data['activities']
 
-    # --- Export Feature ---
+    # Filter activities based on user role first
+    if user['role'] == 'vendor':
+        activities_to_show = [act for act in activities if act.get('properties', {}).get('vendor') == user['username']]
+    else:
+        activities_to_show = activities
+
+    # --- Map Display ---
+    st.subheader("Activity Locations")
+    map_data = []
+    for activity in activities_to_show:
+        coords = activity.get("geometry", {}).get("coordinates")
+        if coords and len(coords) == 2:
+            map_data.append({
+                "lon": coords[0],
+                "lat": coords[1],
+                "title": activity["properties"].get("title", "N/A"),
+                "status": activity["properties"].get("status", "N/A")
+            })
+
+    if map_data:
+        view_state = pdk.ViewState(
+            latitude=pd.DataFrame(map_data)["lat"].mean(),
+            longitude=pd.DataFrame(map_data)["lon"].mean(),
+            zoom=10,
+            pitch=50,
+        )
+
+        layer = pdk.Layer(
+            "ScatterplotLayer",
+            data=pd.DataFrame(map_data),
+            get_position="[lon, lat]",
+            get_color="[200, 30, 0, 160]",
+            get_radius=200,
+            pickable=True,
+        )
+
+        tooltip = {
+            "html": "<b>{title}</b><br/>Status: {status}",
+            "style": {"backgroundColor": "steelblue", "color": "white"},
+        }
+
+        st.pydeck_chart(pdk.Deck(
+            map_style="mapbox://styles/mapbox/light-v9",
+            mapbox_key=MAPBOX_API_KEY,
+            initial_view_state=view_state,
+            layers=[layer],
+            tooltip=tooltip
+        ))
+    else:
+        st.info("No activities with valid locations to display on the map.")
+
+    # --- Controls and List ---
+    st.divider()
     col1, col2 = st.columns([3, 1])
     with col1:
         if user['role'] == 'admin':
@@ -109,7 +165,6 @@ def activity_list_view():
                 st.session_state['view'] = 'create_activity'
                 st.rerun()
     with col2:
-        # Prepare data for download
         export_data = json.dumps(activities, indent=4)
         st.download_button(
             label="📥 Export All Activities",
@@ -118,14 +173,7 @@ def activity_list_view():
             mime="application/json"
         )
 
-    st.divider()
-
-    # Filter activities based on user role
-    if user['role'] == 'vendor':
-        activities_to_show = [act for act in activities if act.get('properties', {}).get('vendor') == user['username']]
-    else:
-        activities_to_show = activities
-
+    st.subheader("Activity List")
     if not activities_to_show:
         st.info("No activities found for your user.")
         return
@@ -151,7 +199,6 @@ def detail_view():
     """Displays the details of a single activity."""
     activity_id = st.session_state['selected_activity_id']
     
-    # Find the activity in session state
     activity_index = next((i for i, act in enumerate(st.session_state.data['activities']) if act['id'] == activity_id), None)
     if activity_index is None:
         st.error("Activity not found.")
@@ -168,6 +215,24 @@ def detail_view():
     st.title(props.get('title'))
     st.caption(f"Activity ID: `{activity_id}`")
 
+    # Details and Map side-by-side
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("Details")
+        st.write(f"**Vendor:** {props.get('vendor')}")
+        st.write(f"**Site:** {props.get('site')}")
+        st.write(f"**Category:** {props.get('category')}")
+        st.write(f"**Description:** {props.get('description')}")
+
+    with col2:
+        coords = activity_data.get("geometry", {}).get("coordinates")
+        if coords and len(coords) == 2:
+            st.subheader("Location")
+            detail_map_data = pd.DataFrame([{"lon": coords[0], "lat": coords[1]}])
+            st.map(detail_map_data)
+        
+    st.divider()
+    
     # Status and Actions
     st.header(f"Status: {props.get('status')}")
     if user['role'] in ['admin', 'vendor']:
@@ -201,14 +266,6 @@ def detail_view():
                     if st.button("Verify", disabled=props['status'] != 'Completed'):
                         update_status('Verified', 'Work Verified')
     
-    # Details
-    st.divider()
-    st.subheader("Details")
-    st.write(f"**Vendor:** {props.get('vendor')}")
-    st.write(f"**Site:** {props.get('site')}")
-    st.write(f"**Category:** {props.get('category')}")
-    st.write(f"**Description:** {props.get('description')}")
-
     # Log
     st.divider()
     st.subheader("Activity Log")
@@ -245,17 +302,24 @@ def create_activity_view():
     with st.form("new_activity_form"):
         title = st.text_input("Title")
         description = st.text_area("Description")
-        vendor_emails = list(st.session_state.data['users'].keys())
-        vendor = st.selectbox("Assign Vendor", options=vendor_emails)
-        site = st.text_input("Site / Location")
-        category = st.selectbox("Category", ["General Maintenance", "Repair EV Charger", "Install Equipment"])
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            vendor_emails = list(st.session_state.data['users'].keys())
+            vendor = st.selectbox("Assign Vendor", options=vendor_emails)
+            site = st.text_input("Site / Location")
+            category = st.selectbox("Category", ["General Maintenance", "Repair EV Charger", "Install Equipment"])
+        with col2:
+            st.subheader("Location")
+            lat = st.number_input("Latitude", value=40.7128, format="%.4f")
+            lon = st.number_input("Longitude", value=-74.0060, format="%.4f")
         
         submitted = st.form_submit_button("Create Activity")
         if submitted:
             new_activity_data = {
                 "id": str(uuid.uuid4()),
                 "type": "Feature",
-                "geometry": {"type": "Point", "coordinates": []},
+                "geometry": {"type": "Point", "coordinates": [lon, lat]},
                 "properties": {
                     "title": title,
                     "description": description,
