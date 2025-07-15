@@ -190,30 +190,6 @@ def detail_view():
     logs = props.get('logs', [])
     user = st.session_state['logged_in_user']
     
-    # Auto-refresh and periodic geofence check
-    if props.get('status') == 'In Progress':
-        location = get_geolocation()
-        if location:
-            center = props.get('geofence_center')
-            radius = props.get('geofence_radius')
-            current_lat = location['coords']['latitude']
-            current_lon = location['coords']['longitude']
-            
-            distance = haversine(current_lon, current_lat, center[1], center[0])
-            
-            if distance > radius:
-                st.warning("You are outside the geofence! Activity will be paused.")
-                props['status'] = 'Paused'
-                props['logs'].append({"timestamp": datetime.now().isoformat(), "user": "System", "action": f"Auto-paused: User moved {int(distance)}m from center (outside {radius}m radius)." })
-                st.rerun()
-            else:
-                 # Add a log for periodic check-in, but check if the last log was recent to avoid spamming
-                last_log_time = datetime.fromisoformat(logs[-1]['timestamp']) if logs else datetime.min
-                if (datetime.now() - last_log_time).total_seconds() > 25:
-                    props['logs'].append({"timestamp": datetime.now().isoformat(), "user": "System", "action": f"Periodic location check: User is within geofence ({int(distance)}m from center)."})
-
-        streamlit_js_eval(js_expressions="setTimeout(function(){window.parent.location.reload()}, 30000)")
-
     st.title(props.get('title'))
     st.caption(f"Activity ID: `{activity_id}`")
 
@@ -235,6 +211,27 @@ def detail_view():
     st.divider()
     
     st.header(f"Status: {props.get('status')}")
+    
+    # Geofence check-in button for "In Progress" status
+    if props.get('status') == 'In Progress':
+        st.info("Periodically check in to verify your location and continue work.")
+        if st.button("Check In & Verify Location", type="primary"):
+            location = get_geolocation()
+            if location:
+                center = props.get('geofence_center')
+                radius = props.get('geofence_radius')
+                current_lat = location['coords']['latitude']
+                current_lon = location['coords']['longitude']
+                distance = haversine(current_lon, current_lat, center[1], center[0])
+                
+                if distance > radius:
+                    st.warning("You are outside the geofence! Activity will be paused.")
+                    props['status'] = 'Paused'
+                    props['logs'].append({"timestamp": datetime.now().isoformat(), "user": "System", "action": f"Auto-paused: User moved {int(distance)}m from center (outside {radius}m radius)." })
+                else:
+                    props['logs'].append({"timestamp": datetime.now().isoformat(), "user": "System", "action": f"Periodic location check: User is within geofence ({int(distance)}m from center)."})
+                st.rerun()
+
     if user['role'] in ['admin', 'vendor']:
         with st.container(border=True):
             st.subheader("Actions")
@@ -270,7 +267,6 @@ def detail_view():
                     handle_action('In Progress', 'Work Started')
             with cols[1]:
                 if st.button("Pause", disabled=props['status'] != 'In Progress'):
-                    # No geofence check needed to pause
                     st.session_state.data['activities'][activity_index]['properties']['status'] = 'Paused'
                     st.session_state.data['activities'][activity_index]['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": user['username'], "action": "Work Paused"})
                     st.rerun()
@@ -283,7 +279,6 @@ def detail_view():
             with cols[4]:
                 if user['role'] == 'admin':
                     if st.button("Verify", disabled=props['status'] != 'Completed'):
-                        # No geofence check needed to verify
                         st.session_state.data['activities'][activity_index]['properties']['status'] = 'Verified'
                         st.session_state.data['activities'][activity_index]['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": user['username'], "action": "Work Verified"})
                         st.rerun()
