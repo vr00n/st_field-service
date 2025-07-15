@@ -212,80 +212,64 @@ def detail_view():
     
     st.header(f"Status: {props.get('status')}")
     
-    # --- Geofence Check-in and Action Confirmation ---
-    pending_action = st.session_state.get('pending_action')
+    # --- Geofence and Action Logic ---
+    # Get location once when the button is clicked
+    if st.button("Get Current Location to Enable Actions"):
+        location = get_geolocation()
+        if location:
+            st.session_state['current_location'] = location
+            st.success(f"Location captured at {datetime.now().strftime('%H:%M:%S')}. You can now perform actions.")
+            st.rerun()
+        else:
+            st.error("Failed to get location. Please ensure you have granted permission.")
 
-    if props.get('status') == 'In Progress':
-        st.info("Periodically check in to verify your location and continue work.")
-        if st.button("Check In & Verify Location", type="primary"):
-            location = get_geolocation()
-            if location:
+    current_location = st.session_state.get('current_location')
+    
+    if current_location:
+        st.info(f"Using location from {datetime.fromtimestamp(current_location['timestamp']/1000).strftime('%H:%M:%S')}")
+
+    if user['role'] in ['admin', 'vendor']:
+        with st.container(border=True):
+            st.subheader("Actions")
+            
+            def perform_action(new_status, action_text):
+                location = st.session_state.get('current_location')
+                if not location:
+                    st.warning("Please get your location before performing an action.")
+                    return
+
                 center = props.get('geofence_center')
                 radius = props.get('geofence_radius')
+                if not center or not radius:
+                    st.error("This activity does not have a geofence defined.")
+                    return
+                
                 current_lat = location['coords']['latitude']
                 current_lon = location['coords']['longitude']
                 distance = haversine(current_lon, current_lat, center[1], center[0])
-                
+
                 if distance > radius:
-                    st.warning("You are outside the geofence! Activity will be paused.")
-                    props['status'] = 'Paused'
-                    props['logs'].append({"timestamp": datetime.now().isoformat(), "user": "System", "action": f"Auto-paused: User moved {int(distance)}m from center (outside {radius}m radius)." })
-                else:
-                    props['logs'].append({"timestamp": datetime.now().isoformat(), "user": "System", "action": f"Periodic location check: User is within geofence ({int(distance)}m from center)."})
-                st.rerun()
-    
-    elif pending_action:
-        action_text = pending_action['action_text']
-        st.warning(f"Click below to confirm your action: **{action_text}**")
-        col1, col2 = st.columns([1,3])
-        with col1:
-            if st.button(f"Confirm {action_text}", type="primary"):
-                location = get_geolocation()
-                if not location:
-                    st.error("Could not get your location. Please enable location services in your browser and try again.")
-                else:
-                    center = props.get('geofence_center')
-                    radius = props.get('geofence_radius')
-                    current_lat = location['coords']['latitude']
-                    current_lon = location['coords']['longitude']
-                    distance = haversine(current_lon, current_lat, center[1], center[0])
+                    st.error(f"Action denied. You are {int(distance)}m away from the site, which is outside the {radius}m geofence.")
+                    return
 
-                    if distance > radius:
-                        st.error(f"Action denied. You are {int(distance)}m away from the site, which is outside the {radius}m geofence.")
-                    else:
-                        st.session_state.data['activities'][activity_index]['properties']['status'] = pending_action['new_status']
-                        st.session_state.data['activities'][activity_index]['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": user['username'], "action": action_text})
-                        st.success(f"Action '{action_text}' successful. You are {int(distance)}m from the site center.")
-                        del st.session_state['pending_action']
-                        st.rerun()
-        with col2:
-            if st.button("Cancel"):
-                del st.session_state['pending_action']
+                st.session_state.data['activities'][activity_index]['properties']['status'] = new_status
+                st.session_state.data['activities'][activity_index]['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": user['username'], "action": action_text})
+                st.success(f"Action '{action_text}' successful. You are {int(distance)}m from the site center.")
+                del st.session_state['current_location'] # Require new location for next action
                 st.rerun()
-    
-    elif user['role'] in ['admin', 'vendor']:
-        with st.container(border=True):
-            st.subheader("Actions")
+
             cols = st.columns(5)
-            
-            def set_pending_action(new_status, action_text):
-                st.session_state['pending_action'] = {'new_status': new_status, 'action_text': action_text}
-                st.rerun()
-
             with cols[0]:
-                if st.button("Start", disabled=props['status'] != 'Pending'):
-                    set_pending_action('In Progress', 'Work Started')
+                st.button("Start", on_click=perform_action, args=('In Progress', 'Work Started'), disabled=props['status'] != 'Pending' or not current_location)
             with cols[1]:
                 if st.button("Pause", disabled=props['status'] != 'In Progress'):
                     st.session_state.data['activities'][activity_index]['properties']['status'] = 'Paused'
                     st.session_state.data['activities'][activity_index]['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": user['username'], "action": "Work Paused"})
                     st.rerun()
             with cols[2]:
-                 if st.button("Resume", disabled=props['status'] != 'Paused'):
-                    set_pending_action('In Progress', 'Work Resumed')
+                 st.button("Resume", on_click=perform_action, args=('In Progress', 'Work Resumed'), disabled=props['status'] != 'Paused' or not current_location)
             with cols[3]:
-                if st.button("Complete", disabled=props['status'] not in ['In Progress', 'Paused']):
-                    set_pending_action('Completed', 'Work Completed')
+                st.button("Complete", on_click=perform_action, args=('Completed', 'Work Completed'), disabled=props['status'] not in ['In Progress', 'Paused'] or not current_location)
             with cols[4]:
                 if user['role'] == 'admin':
                     if st.button("Verify", disabled=props['status'] != 'Completed'):
@@ -311,7 +295,7 @@ def detail_view():
             st.rerun()
 
     if st.button("Back to List"):
-        if 'pending_action' in st.session_state: del st.session_state['pending_action']
+        if 'current_location' in st.session_state: del st.session_state['current_location']
         del st.session_state['selected_activity_id']
         st.session_state['view'] = 'list'
         st.rerun()
@@ -375,8 +359,8 @@ def main():
         st.session_state['logged_in_user'] = None
     if 'view' not in st.session_state:
         st.session_state['view'] = 'list'
-    if 'pending_action' not in st.session_state:
-        st.session_state['pending_action'] = None
+    if 'current_location' not in st.session_state:
+        st.session_state['current_location'] = None
 
     if st.session_state.get('logged_in_user'):
         st.sidebar.header("User")
