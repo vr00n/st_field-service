@@ -220,8 +220,8 @@ def detail_view():
         with st.container(border=True):
             
             def perform_action(new_status, action_text):
-                if not location:
-                    st.warning("Please share your location using the button above to perform actions.")
+                if not location or 'latitude' not in location or 'longitude' not in location:
+                    st.warning("Could not get a valid location. Please share your location using the button above to perform actions.")
                     return
 
                 center = props.get('geofence_center')
@@ -232,6 +232,11 @@ def detail_view():
                 
                 current_lat = location['latitude']
                 current_lon = location['longitude']
+                
+                if current_lat is None or current_lon is None:
+                    st.warning("Could not get a valid location. Please share your location using the button above to perform actions.")
+                    return
+
                 distance = haversine(current_lon, current_lat, center[1], center[0])
 
                 if distance > radius:
