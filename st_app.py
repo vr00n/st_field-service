@@ -3,7 +3,7 @@ import json
 from datetime import datetime, timedelta
 import uuid
 import pandas as pd
-from streamlit_js_eval import streamlit_js_eval, get_geolocation
+from streamlit_geolocation import streamlit_geolocation
 from math import radians, cos, sin, asin, sqrt
 
 # --- Geofence Helper Function ---
@@ -213,29 +213,15 @@ def detail_view():
     st.header(f"Status: {props.get('status')}")
     
     # --- Geofence and Action Logic ---
-    # Get location once when the button is clicked
-    if st.button("Get Current Location to Enable Actions"):
-        location = get_geolocation()
-        if location:
-            st.session_state['current_location'] = location
-            st.success(f"Location captured at {datetime.now().strftime('%H:%M:%S')}. You can now perform actions.")
-            st.rerun()
-        else:
-            st.error("Failed to get location. Please ensure you have granted permission.")
-
-    current_location = st.session_state.get('current_location')
+    st.subheader("Location & Actions")
+    location = streamlit_geolocation()
     
-    if current_location:
-        st.info(f"Using location from {datetime.fromtimestamp(current_location['timestamp']/1000).strftime('%H:%M:%S')}")
-
     if user['role'] in ['admin', 'vendor']:
         with st.container(border=True):
-            st.subheader("Actions")
             
             def perform_action(new_status, action_text):
-                location = st.session_state.get('current_location')
                 if not location:
-                    st.warning("Please get your location before performing an action.")
+                    st.warning("Please share your location using the button above to perform actions.")
                     return
 
                 center = props.get('geofence_center')
@@ -244,8 +230,8 @@ def detail_view():
                     st.error("This activity does not have a geofence defined.")
                     return
                 
-                current_lat = location['coords']['latitude']
-                current_lon = location['coords']['longitude']
+                current_lat = location['latitude']
+                current_lon = location['longitude']
                 distance = haversine(current_lon, current_lat, center[1], center[0])
 
                 if distance > radius:
@@ -255,21 +241,20 @@ def detail_view():
                 st.session_state.data['activities'][activity_index]['properties']['status'] = new_status
                 st.session_state.data['activities'][activity_index]['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": user['username'], "action": action_text})
                 st.success(f"Action '{action_text}' successful. You are {int(distance)}m from the site center.")
-                del st.session_state['current_location'] # Require new location for next action
                 st.rerun()
 
             cols = st.columns(5)
             with cols[0]:
-                st.button("Start", on_click=perform_action, args=('In Progress', 'Work Started'), disabled=props['status'] != 'Pending' or not current_location)
+                st.button("Start", on_click=perform_action, args=('In Progress', 'Work Started'), disabled=props['status'] != 'Pending' or not location)
             with cols[1]:
                 if st.button("Pause", disabled=props['status'] != 'In Progress'):
                     st.session_state.data['activities'][activity_index]['properties']['status'] = 'Paused'
                     st.session_state.data['activities'][activity_index]['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": user['username'], "action": "Work Paused"})
                     st.rerun()
             with cols[2]:
-                 st.button("Resume", on_click=perform_action, args=('In Progress', 'Work Resumed'), disabled=props['status'] != 'Paused' or not current_location)
+                 st.button("Resume", on_click=perform_action, args=('In Progress', 'Work Resumed'), disabled=props['status'] != 'Paused' or not location)
             with cols[3]:
-                st.button("Complete", on_click=perform_action, args=('Completed', 'Work Completed'), disabled=props['status'] not in ['In Progress', 'Paused'] or not current_location)
+                st.button("Complete", on_click=perform_action, args=('Completed', 'Work Completed'), disabled=props['status'] not in ['In Progress', 'Paused'] or not location)
             with cols[4]:
                 if user['role'] == 'admin':
                     if st.button("Verify", disabled=props['status'] != 'Completed'):
@@ -295,8 +280,6 @@ def detail_view():
             st.rerun()
 
     if st.button("Back to List"):
-        if 'current_location' in st.session_state: del st.session_state['current_location']
-        del st.session_state['selected_activity_id']
         st.session_state['view'] = 'list'
         st.rerun()
 
@@ -359,8 +342,6 @@ def main():
         st.session_state['logged_in_user'] = None
     if 'view' not in st.session_state:
         st.session_state['view'] = 'list'
-    if 'current_location' not in st.session_state:
-        st.session_state['current_location'] = None
 
     if st.session_state.get('logged_in_user'):
         st.sidebar.header("User")
