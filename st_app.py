@@ -1,6 +1,6 @@
 import streamlit as st
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
 import pandas as pd
 
@@ -8,6 +8,7 @@ import pandas as pd
 # This data will populate the app on first run and will reset on refresh.
 def get_initial_data():
     """Returns the initial mock data for the session."""
+    now = datetime.now()
     return {
         "activities": [
             {
@@ -21,10 +22,10 @@ def get_initial_data():
                     "site": "Zerega",
                     "category": "Repair EV Charger",
                     "status": "Pending",
-                    "createdAt": datetime(2025, 7, 14, 10, 0, 0).isoformat(),
+                    "createdAt": (now - timedelta(days=1)).isoformat(),
                     "logs": [
                         {
-                            "timestamp": datetime(2025, 7, 14, 10, 0, 0).isoformat(),
+                            "timestamp": (now - timedelta(days=1)).isoformat(),
                             "user": "admin",
                             "action": "Activity created."
                         }
@@ -42,15 +43,15 @@ def get_initial_data():
                     "site": "JFK Depot",
                     "category": "Install Equipment",
                     "status": "In Progress",
-                    "createdAt": datetime(2025, 7, 13, 14, 30, 0).isoformat(),
+                    "createdAt": (now - timedelta(days=2)).isoformat(),
                     "logs": [
                          {
-                            "timestamp": datetime(2025, 7, 13, 14, 30, 0).isoformat(),
+                            "timestamp": (now - timedelta(days=2)).isoformat(),
                             "user": "admin",
                             "action": "Activity created."
                         },
                         {
-                            "timestamp": datetime(2025, 7, 14, 9, 5, 0).isoformat(),
+                            "timestamp": (now - timedelta(hours=1)).isoformat(),
                             "user": "vendor@example.com",
                             "action": "Work Started"
                         }
@@ -211,9 +212,13 @@ def detail_view():
     # Log
     st.divider()
     st.subheader("Activity Log")
-    log_df = pd.DataFrame(logs)
-    log_df['timestamp'] = pd.to_datetime(log_df['timestamp'])
-    st.dataframe(log_df.sort_values(by="timestamp", ascending=False), use_container_width=True)
+    if logs:
+        log_df = pd.DataFrame(logs)
+        log_df['timestamp'] = pd.to_datetime(log_df['timestamp'], errors='coerce')
+        log_df.dropna(subset=['timestamp'], inplace=True)
+        st.dataframe(log_df.sort_values(by="timestamp", ascending=False), use_container_width=True)
+    else:
+        st.write("No log entries yet.")
 
 
     # Add Comment
