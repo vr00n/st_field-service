@@ -3,9 +3,27 @@ import json
 from datetime import datetime, timedelta
 import uuid
 import pandas as pd
+from streamlit_js_eval import streamlit_js_eval, get_geolocation
+from math import radians, cos, sin, asin, sqrt
+
+# --- Geofence Helper Function ---
+def haversine(lon1, lat1, lon2, lat2):
+    """
+    Calculate the great circle distance in meters between two points 
+    on the earth (specified in decimal degrees)
+    """
+    # convert decimal degrees to radians 
+    lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
+
+    # haversine formula 
+    dlon = lon2 - lon1 
+    dlat = lat2 - lat1 
+    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    c = 2 * asin(sqrt(a)) 
+    r = 6371 # Radius of earth in kilometers.
+    return c * r * 1000 # convert to meters
 
 # --- Initial Mock Data ---
-# This data will populate the app on first run and will reset on refresh.
 def get_initial_data():
     """Returns the initial mock data for the session."""
     now = datetime.now()
@@ -23,6 +41,8 @@ def get_initial_data():
                     "category": "Repair EV Charger",
                     "status": "Pending",
                     "createdAt": (now - timedelta(days=1)).isoformat(),
+                    "geofence_center": [40.85, -73.844], # lat, lon
+                    "geofence_radius": 500, # in meters
                     "logs": [
                         {
                             "timestamp": (now - timedelta(days=1)).isoformat(),
@@ -44,6 +64,8 @@ def get_initial_data():
                     "category": "Install Equipment",
                     "status": "In Progress",
                     "createdAt": (now - timedelta(days=2)).isoformat(),
+                    "geofence_center": [40.641, -73.778], # lat, lon
+                    "geofence_radius": 1000, # in meters
                     "logs": [
                          {
                             "timestamp": (now - timedelta(days=2)).isoformat(),
@@ -101,30 +123,24 @@ def activity_list_view():
     user = st.session_state['logged_in_user']
     activities = st.session_state.data['activities']
 
-    # Filter activities based on user role first
     if user['role'] == 'vendor':
         activities_to_show = [act for act in activities if act.get('properties', {}).get('vendor') == user['username']]
     else:
         activities_to_show = activities
 
-    # --- Map Display using st.map ---
     st.subheader("Activity Locations")
     map_data = []
     for activity in activities_to_show:
         coords = activity.get("geometry", {}).get("coordinates")
         if coords and len(coords) == 2:
-            map_data.append({
-                "lon": coords[0],
-                "lat": coords[1],
-            })
+            map_data.append({"lon": coords[0], "lat": coords[1]})
 
     if map_data:
         df = pd.DataFrame(map_data)
-        st.map(df)
+        st.map(df, zoom=10)
     else:
-        st.info("No activities with valid locations to display on the map.")
+        st.info("No activities with valid locations to display.")
 
-    # --- Controls and List ---
     st.divider()
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -154,10 +170,8 @@ def activity_list_view():
                 st.subheader(props.get('title', 'No Title'))
             with col2:
                 st.info(props.get('status', 'Unknown'))
-
             st.write(f"**Vendor:** {props.get('vendor', 'N/A')}")
             st.write(f"**Site:** {props.get('site', 'N/A')}")
-
             if st.button("View Details", key=activity['id']):
                 st.session_state['view'] = 'detail'
                 st.session_state['selected_activity_id'] = activity['id']
@@ -169,21 +183,40 @@ def detail_view():
     
     activity_index = next((i for i, act in enumerate(st.session_state.data['activities']) if act['id'] == activity_id), None)
     if activity_index is None:
-        st.error("Activity not found.")
-        if st.button("Back to List"):
-            st.session_state['view'] = 'list'
-            st.rerun()
-        return
+        st.error("Activity not found."); return
 
     activity_data = st.session_state.data['activities'][activity_index]
     props = activity_data.get('properties', {})
     logs = props.get('logs', [])
     user = st.session_state['logged_in_user']
     
+    # Auto-refresh and periodic geofence check
+    if props.get('status') == 'In Progress':
+        location = get_geolocation()
+        if location:
+            center = props.get('geofence_center')
+            radius = props.get('geofence_radius')
+            current_lat = location['coords']['latitude']
+            current_lon = location['coords']['longitude']
+            
+            distance = haversine(current_lon, current_lat, center[1], center[0])
+            
+            if distance > radius:
+                st.warning("You are outside the geofence! Activity will be paused.")
+                props['status'] = 'Paused'
+                props['logs'].append({"timestamp": datetime.now().isoformat(), "user": "System", "action": f"Auto-paused: User moved {int(distance)}m from center (outside {radius}m radius)." })
+                st.rerun()
+            else:
+                 # Add a log for periodic check-in, but check if the last log was recent to avoid spamming
+                last_log_time = datetime.fromisoformat(logs[-1]['timestamp']) if logs else datetime.min
+                if (datetime.now() - last_log_time).total_seconds() > 25:
+                    props['logs'].append({"timestamp": datetime.now().isoformat(), "user": "System", "action": f"Periodic location check: User is within geofence ({int(distance)}m from center)."})
+
+        streamlit_js_eval(js_expressions="setTimeout(function(){window.parent.location.reload()}, 30000)")
+
     st.title(props.get('title'))
     st.caption(f"Activity ID: `{activity_id}`")
 
-    # Details and Map side-by-side
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Details")
@@ -191,71 +224,85 @@ def detail_view():
         st.write(f"**Site:** {props.get('site')}")
         st.write(f"**Category:** {props.get('category')}")
         st.write(f"**Description:** {props.get('description')}")
+        st.write(f"**Geofence Radius:** {props.get('geofence_radius')} meters")
 
     with col2:
         coords = activity_data.get("geometry", {}).get("coordinates")
         if coords and len(coords) == 2:
             st.subheader("Location")
-            detail_map_data = pd.DataFrame([{"lon": coords[0], "lat": coords[1]}])
-            st.map(detail_map_data)
+            st.map(pd.DataFrame([{"lon": coords[0], "lat": coords[1]}]))
         
     st.divider()
     
-    # Status and Actions
     st.header(f"Status: {props.get('status')}")
     if user['role'] in ['admin', 'vendor']:
         with st.container(border=True):
             st.subheader("Actions")
-            cols = st.columns(5)
             
-            def update_status(new_status, action_text):
+            def handle_action(new_status, action_text):
+                location = get_geolocation()
+                if not location:
+                    st.error("Could not get your location. Please enable location services in your browser.")
+                    return
+
+                center = props.get('geofence_center')
+                radius = props.get('geofence_radius')
+                if not center or not radius:
+                    st.error("This activity does not have a geofence defined.")
+                    return
+                
+                current_lat = location['coords']['latitude']
+                current_lon = location['coords']['longitude']
+                distance = haversine(current_lon, current_lat, center[1], center[0])
+
+                if distance > radius:
+                    st.error(f"Action denied. You are {int(distance)}m away from the site, which is outside the {radius}m geofence.")
+                    return
+
                 st.session_state.data['activities'][activity_index]['properties']['status'] = new_status
-                st.session_state.data['activities'][activity_index]['properties']['logs'].append({
-                    "timestamp": datetime.now().isoformat(), 
-                    "user": user['username'], 
-                    "action": action_text
-                })
+                st.session_state.data['activities'][activity_index]['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": user['username'], "action": action_text})
+                st.success(f"Action '{action_text}' successful. You are {int(distance)}m from the site center.")
                 st.rerun()
 
+            cols = st.columns(5)
             with cols[0]:
                 if st.button("Start", disabled=props['status'] != 'Pending'):
-                    update_status('In Progress', 'Work Started')
+                    handle_action('In Progress', 'Work Started')
             with cols[1]:
                 if st.button("Pause", disabled=props['status'] != 'In Progress'):
-                    update_status('Paused', 'Work Paused')
+                    # No geofence check needed to pause
+                    st.session_state.data['activities'][activity_index]['properties']['status'] = 'Paused'
+                    st.session_state.data['activities'][activity_index]['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": user['username'], "action": "Work Paused"})
+                    st.rerun()
             with cols[2]:
                  if st.button("Resume", disabled=props['status'] != 'Paused'):
-                    update_status('In Progress', 'Work Resumed')
+                    handle_action('In Progress', 'Work Resumed')
             with cols[3]:
                 if st.button("Complete", disabled=props['status'] not in ['In Progress', 'Paused']):
-                    update_status('Completed', 'Work Completed')
+                    handle_action('Completed', 'Work Completed')
             with cols[4]:
                 if user['role'] == 'admin':
                     if st.button("Verify", disabled=props['status'] != 'Completed'):
-                        update_status('Verified', 'Work Verified')
+                        # No geofence check needed to verify
+                        st.session_state.data['activities'][activity_index]['properties']['status'] = 'Verified'
+                        st.session_state.data['activities'][activity_index]['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": user['username'], "action": "Work Verified"})
+                        st.rerun()
     
-    # Log
     st.divider()
     st.subheader("Activity Log")
     if logs:
         log_df = pd.DataFrame(logs)
         log_df['timestamp'] = pd.to_datetime(log_df['timestamp'], errors='coerce')
         log_df.dropna(subset=['timestamp'], inplace=True)
-        st.dataframe(log_df.sort_values(by="timestamp", ascending=False), use_container_width=True)
+        st.dataframe(log_df.sort_values(by="timestamp", ascending=False), use_container_width=True, hide_index=True)
     else:
         st.write("No log entries yet.")
 
-
-    # Add Comment
     with st.form("comment_form"):
         comment = st.text_area("Add a comment or note")
         submitted = st.form_submit_button("Submit Comment")
         if submitted and comment:
-            st.session_state.data['activities'][activity_index]['properties']['logs'].append({
-                "timestamp": datetime.now().isoformat(), 
-                "user": user['username'], 
-                "action": f"Comment: {comment}"
-            })
+            st.session_state.data['activities'][activity_index]['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": user['username'], "action": f"Comment: {comment}"})
             st.rerun()
 
     if st.button("Back to List"):
@@ -278,9 +325,10 @@ def create_activity_view():
             site = st.text_input("Site / Location")
             category = st.selectbox("Category", ["General Maintenance", "Repair EV Charger", "Install Equipment"])
         with col2:
-            st.subheader("Location")
-            lat = st.number_input("Latitude", value=40.7128, format="%.4f")
-            lon = st.number_input("Longitude", value=-74.0060, format="%.4f")
+            st.subheader("Geofence")
+            lat = st.number_input("Center Latitude", value=40.7128, format="%.6f")
+            lon = st.number_input("Center Longitude", value=-74.0060, format="%.6f")
+            radius = st.number_input("Radius (meters)", value=500, min_value=50, step=50)
         
         submitted = st.form_submit_button("Create Activity")
         if submitted:
@@ -296,11 +344,9 @@ def create_activity_view():
                     "category": category,
                     "status": "Pending",
                     "createdAt": datetime.now().isoformat(),
-                    "logs": [{
-                        "timestamp": datetime.now().isoformat(),
-                        "user": st.session_state['logged_in_user']['username'],
-                        "action": "Activity created."
-                    }]
+                    "geofence_center": [lat, lon],
+                    "geofence_radius": radius,
+                    "logs": [{"timestamp": datetime.now().isoformat(), "user": st.session_state['logged_in_user']['username'], "action": "Activity created."}]
                 }
             }
             st.session_state.data['activities'].append(new_activity_data)
@@ -317,7 +363,6 @@ def main():
     """Main application router."""
     st.set_page_config(layout="wide")
 
-    # Initialize session state
     if 'data' not in st.session_state:
         st.session_state['data'] = get_initial_data()
     if 'logged_in_user' not in st.session_state:
@@ -325,17 +370,15 @@ def main():
     if 'view' not in st.session_state:
         st.session_state['view'] = 'list'
 
-    # Sidebar for logout
     if st.session_state.get('logged_in_user'):
         st.sidebar.header("User")
         st.sidebar.write(f"Welcome, **{st.session_state['logged_in_user']['username']}**!")
         st.sidebar.write(f"Role: `{st.session_state['logged_in_user']['role']}`")
         if st.sidebar.button("Logout"):
             st.session_state['logged_in_user'] = None
-            st.session_state['view'] = 'list' # Reset view on logout
+            st.session_state['view'] = 'list'
             st.rerun()
     
-    # Main content router
     if not st.session_state.get('logged_in_user'):
         login_page()
     else:
