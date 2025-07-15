@@ -3,10 +3,6 @@ import json
 from datetime import datetime, timedelta
 import uuid
 import pandas as pd
-import pydeck as pdk
-
-# --- Mapbox Configuration ---
-MAPBOX_API_KEY = "pk.eyJ1IjoidnIwMG4tbnljc2J1cyIsImEiOiJjbDB5cHhoeHgxcmEyM2ptdXVkczk1M2xlIn0.qq6o-6TMurwke-t1eyetBw"
 
 # --- Initial Mock Data ---
 # This data will populate the app on first run and will reset on refresh.
@@ -111,7 +107,7 @@ def activity_list_view():
     else:
         activities_to_show = activities
 
-    # --- Map Display ---
+    # --- Map Display using st.map ---
     st.subheader("Activity Locations")
     map_data = []
     for activity in activities_to_show:
@@ -120,38 +116,11 @@ def activity_list_view():
             map_data.append({
                 "lon": coords[0],
                 "lat": coords[1],
-                "title": activity["properties"].get("title", "N/A"),
-                "status": activity["properties"].get("status", "N/A")
             })
 
     if map_data:
-        view_state = pdk.ViewState(
-            latitude=pd.DataFrame(map_data)["lat"].mean(),
-            longitude=pd.DataFrame(map_data)["lon"].mean(),
-            zoom=10,
-            pitch=50,
-        )
-
-        layer = pdk.Layer(
-            "ScatterplotLayer",
-            data=pd.DataFrame(map_data),
-            get_position="[lon, lat]",
-            get_color="[200, 30, 0, 160]",
-            get_radius=200,
-            pickable=True,
-        )
-
-        tooltip = {
-            "html": "<b>{title}</b><br/>Status: {status}",
-            "style": {"backgroundColor": "steelblue", "color": "white"},
-        }
-
-        st.pydeck_chart(pdk.Deck(
-            map_style="mapbox://styles/mapbox/light-v9",
-            initial_view_state=view_state,
-            layers=[layer],
-            tooltip=tooltip
-        ), mapbox_key=MAPBOX_API_KEY)
+        df = pd.DataFrame(map_data)
+        st.map(df)
     else:
         st.info("No activities with valid locations to display on the map.")
 
