@@ -1,0 +1,31 @@
+{
+    "id": "1497f821-bcf3-4923-bd25-80480080dd77",
+    "type": "Feature",
+    "geometry": {
+        "type": "Point",
+        "coordinates": [
+            -73.94868215068058,
+            40.77708341778832
+        ]
+    },
+    "properties": {
+        "title": "test",
+        "description": "test, ",
+        "vendor": "vendor@example.com",
+        "site": "401e86",
+        "status": "Pending",
+        "createdAt": "2025-07-16T10:08:05.490653",
+        "geofence_center": [
+            40.77708341778832,
+            -73.94868215068058
+        ],
+        "geofence_radius": 500,
+        "logs": [
+            {
+                "timestamp": "2025-07-16T10:08:05.490659",
+                "user": "admin",
+                "action": "Activity created."
+            }
+        ]
+    }
+}
