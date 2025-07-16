@@ -5,6 +5,7 @@ import base64
 from datetime import datetime, timedelta
 import uuid
 import pandas as pd
+import pydeck as pdk
 from streamlit_geolocation import streamlit_geolocation
 from math import radians, cos, sin, asin, sqrt
 
@@ -151,9 +152,60 @@ def activity_list_view():
         activities_to_show = all_activities
 
     st.subheader("Activity Locations")
-    map_data = [{"lon": act["geometry"]["coordinates"][0], "lat": act["geometry"]["coordinates"][1]} for act in activities_to_show if act.get("geometry", {}).get("coordinates")]
+    map_data = []
+    for activity in activities_to_show:
+        coords = activity.get("geometry", {}).get("coordinates")
+        if coords and len(coords) == 2:
+            map_data.append({
+                "lon": coords[0],
+                "lat": coords[1],
+                "title": activity["properties"].get("title", "N/A"),
+                "status": activity["properties"].get("status", "N/A")
+            })
+
     if map_data:
-        st.map(pd.DataFrame(map_data), zoom=10)
+        df = pd.DataFrame(map_data)
+        
+        ICON_URL = "https://upload.wikimedia.org/wikipedia/commons/thumb/d/d1/Map_marker_icon_%E2%80%93_Nicolas_Mollet_%E2%80%93_Work.svg/1024px-Map_marker_icon_%E2%80%93_Nicolas_Mollet_%E2%80%93_Work.svg.png"
+        icon_data = {
+            "url": ICON_URL,
+            "width": 1024,
+            "height": 1024,
+            "anchorY": 1024,
+        }
+        df["icon_data"] = [icon_data] * len(df)
+
+        view_state = pdk.ViewState(
+            latitude=df["lat"].mean(),
+            longitude=df["lon"].mean(),
+            zoom=10,
+            pitch=45,
+        )
+
+        icon_layer = pdk.Layer(
+            "IconLayer",
+            data=df,
+            get_icon="icon_data",
+            get_position='[lon, lat]',
+            get_size=4,
+            size_scale=15,
+            pickable=True,
+        )
+
+        tooltip = {
+            "html": "<b>{title}</b><br/>Status: {status}",
+            "style": {"backgroundColor": "steelblue", "color": "white"},
+        }
+        
+        deck = pdk.Deck(
+            map_style=None, # Use default pydeck style, no key needed
+            initial_view_state=view_state,
+            layers=[icon_layer],
+            tooltip=tooltip
+        )
+        st.pydeck_chart(deck)
+    else:
+        st.info("No activities with valid locations to display on the map.")
 
     st.divider()
     col1, col2 = st.columns([3, 1])
@@ -180,7 +232,6 @@ def activity_list_view():
                 st.session_state['selected_activity_filename'] = activity['filename']
                 st.rerun()
             
-
 def detail_view(activity_filename, read_only=False):
     filepath = f"{PATH_IN_REPO}/{activity_filename}"
     activity_data, sha = get_file_content(filepath)
@@ -190,6 +241,19 @@ def detail_view(activity_filename, read_only=False):
     props = activity_data.get('properties', {})
     logs = props.get('logs', [])
     user = st.session_state.get('logged_in_user', {"username": "Public", "role": "public"})
+
+    if props.get('status') == 'In Progress' and not read_only:
+        st.html("<meta http-equiv='refresh' content='30'>")
+        location = streamlit_geolocation()
+        if location and location.get('latitude') is not None:
+            last_log_time = datetime.fromisoformat(logs[-1]['timestamp']) if logs else datetime.min
+            if (datetime.now() - last_log_time).total_seconds() > 25:
+                activity_data['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": "System", "action": "Periodic location check."})
+                if 'location_trail' not in activity_data['properties']:
+                    activity_data['properties']['location_trail'] = []
+                activity_data['properties']['location_trail'].append({"timestamp": datetime.now().isoformat(), "coordinates": [location['longitude'], location['latitude']]})
+                create_or_update_file(filepath, activity_data, sha, "Periodic location update")
+                st.rerun()
 
     st.title(props.get('title'))
     if not read_only: st.caption(f"Activity File: `{activity_filename}`")
@@ -207,24 +271,9 @@ def detail_view(activity_filename, read_only=False):
     st.divider()
     st.header(f"Status: {props.get('status')}")
 
-    location = None
     if not read_only and user['role'] in ['admin', 'vendor']:
         st.subheader("Location & Actions")
-        # This is the single location component for all actions on this page.
         location = streamlit_geolocation()
-
-        # Auto-refresh and periodic location tracking for "In Progress" status
-        if props.get('status') == 'In Progress':
-            st.html("<meta http-equiv='refresh' content='30'>")
-            if location and location.get('latitude') is not None:
-                last_log_time = datetime.fromisoformat(logs[-1]['timestamp']) if logs else datetime.min
-                if (datetime.now() - last_log_time).total_seconds() > 25:
-                    activity_data['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": "System", "action": "Periodic location check."})
-                    if 'location_trail' not in activity_data['properties']:
-                        activity_data['properties']['location_trail'] = []
-                    activity_data['properties']['location_trail'].append({"timestamp": datetime.now().isoformat(), "coordinates": [location['longitude'], location['latitude']]})
-                    create_or_update_file(filepath, activity_data, sha, "Periodic location update")
-                    st.rerun()
         
         def perform_action(new_status, action_text):
             if not location or location.get('latitude') is None:
