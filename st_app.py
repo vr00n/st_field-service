@@ -143,9 +143,6 @@ def activity_list_view():
                 content['filename'] = item['name']
                 all_activities.append(content)
 
-    if not all_activities:
-        st.info("No activity files found in the repository path.")
-
     if user['role'] == 'vendor':
         activities_to_show = [act for act in all_activities if act.get('properties', {}).get('vendor') == user['username']]
     else:
@@ -219,19 +216,46 @@ def activity_list_view():
         st.download_button("📥 Export All Activities", export_data, f"activities_{datetime.now().strftime('%Y%m%d')}.json", "application/json")
 
     st.subheader("Activity List")
+    
+    if not activities_to_show:
+        st.info("No activities found.")
+        return
+
+    table_data = []
     for activity in sorted(activities_to_show, key=lambda x: x.get('properties', {}).get('createdAt', ''), reverse=True):
         props = activity.get('properties', {})
-        with st.container(border=True):
-            col1, col2 = st.columns([3, 1])
-            with col1: st.subheader(props.get('title', 'No Title'))
-            with col2: st.info(props.get('status', 'Unknown'))
-            st.write(f"**Vendor:** {props.get('vendor', 'N/A')}")
-            st.write(f"**Site:** {props.get('site', 'N/A')}")
-            if st.button("View Details", key=activity['filename']):
-                st.session_state['view'] = 'detail'
-                st.session_state['selected_activity_filename'] = activity['filename']
-                st.rerun()
+        table_data.append({
+            "Status": props.get('status', 'Unknown'),
+            "Title": props.get('title', 'N/A'),
+            "Vendor": props.get('vendor', 'N/A'),
+            "Site": props.get('site', 'N/A'),
+            "filename": activity.get('filename') 
+        })
+    
+    if table_data:
+        df_table = pd.DataFrame(table_data)
+        
+        # Use st.dataframe with on_select for interactivity
+        selection = st.dataframe(
+            df_table,
+            on_select="rerun",
+            selection_mode="single-row",
+            hide_index=True,
+            column_order=("Status", "Title", "Vendor", "Site"), # Control column order
+            column_config={
+                "filename": None # Hide the filename column from view
+            }
+        )
+
+        # Handle row selection
+        if selection.selection['rows']:
+            selected_row_index = selection.selection['rows'][0]
+            selected_filename = df_table.iloc[selected_row_index]['filename']
             
+            st.session_state['view'] = 'detail'
+            st.session_state['selected_activity_filename'] = selected_filename
+            st.rerun()
+
 def detail_view(activity_filename, read_only=False):
     filepath = f"{PATH_IN_REPO}/{activity_filename}"
     activity_data, sha = get_file_content(filepath)
@@ -320,7 +344,6 @@ def detail_view(activity_filename, read_only=False):
     st.subheader("Activity Log")
     if logs:
         log_df = pd.DataFrame(logs)
-        # Use format='ISO8601' to handle varying timestamp precision
         log_df['timestamp'] = pd.to_datetime(log_df['timestamp'], format='ISO8601', errors='coerce')
         log_df.dropna(subset=['timestamp'], inplace=True)
         st.dataframe(log_df.sort_values(by="timestamp", ascending=False), use_container_width=True, hide_index=True)
