@@ -173,17 +173,16 @@ def activity_list_view():
     st.subheader("Activity List")
     for activity in sorted(activities_to_show, key=lambda x: x.get('properties', {}).get('createdAt', ''), reverse=True):
         props = activity.get('properties', {})
-        # Use the filename as the key and for selection
-        if st.button("View Details", key=activity['filename']):
-            st.session_state['view'] = 'detail'
-            st.session_state['selected_activity_filename'] = activity['filename']
-            st.rerun()
         with st.container(border=True):
             col1, col2 = st.columns([3, 1])
             with col1: st.subheader(props.get('title', 'No Title'))
             with col2: st.info(props.get('status', 'Unknown'))
             st.write(f"**Vendor:** {props.get('vendor', 'N/A')}")
             st.write(f"**Site:** {props.get('site', 'N/A')}")
+            if st.button("View Details", key=activity['filename']):
+                st.session_state['view'] = 'detail'
+                st.session_state['selected_activity_filename'] = activity['filename']
+                st.rerun()
             
 
 def detail_view(activity_filename, read_only=False):
@@ -217,8 +216,9 @@ def detail_view(activity_filename, read_only=False):
         location = streamlit_geolocation()
         
         def perform_action(new_status, action_text):
-            if not location or 'latitude' not in location:
-                st.warning("Please share location to perform actions."); return
+            if not location or location.get('latitude') is None or location.get('longitude') is None:
+                st.warning("Could not get a valid location. Please share your location using the button above and try again.")
+                return
             
             center = props.get('geofence_center')
             radius = props.get('geofence_radius')
