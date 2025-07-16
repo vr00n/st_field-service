@@ -193,14 +193,15 @@ def detail_view(activity_filename, read_only=False):
 
     if props.get('status') == 'In Progress' and not read_only:
         st.html("<meta http-equiv='refresh' content='30'>")
-        location = streamlit_geolocation(key=f"loc_tracker_{activity_filename}")
-        if location and location.get('latitude') is not None:
+        # The location component is now called once here for the auto-refresh logic
+        location_tracker = streamlit_geolocation() 
+        if location_tracker and location_tracker.get('latitude') is not None:
             last_log_time = datetime.fromisoformat(logs[-1]['timestamp']) if logs else datetime.min
             if (datetime.now() - last_log_time).total_seconds() > 25:
                 activity_data['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": "System", "action": "Periodic location check."})
                 if 'location_trail' not in activity_data['properties']:
                     activity_data['properties']['location_trail'] = []
-                activity_data['properties']['location_trail'].append({"timestamp": datetime.now().isoformat(), "coordinates": [location['longitude'], location['latitude']]})
+                activity_data['properties']['location_trail'].append({"timestamp": datetime.now().isoformat(), "coordinates": [location_tracker['longitude'], location_tracker['latitude']]})
                 create_or_update_file(filepath, activity_data, sha, "Periodic location update")
                 st.rerun()
 
@@ -222,7 +223,8 @@ def detail_view(activity_filename, read_only=False):
 
     if not read_only and user['role'] in ['admin', 'vendor']:
         st.subheader("Location & Actions")
-        location = streamlit_geolocation(key=f"action_loc_{activity_filename}")
+        # This is the single location component for user actions.
+        location = streamlit_geolocation()
         
         def perform_action(new_status, action_text):
             if not location or location.get('latitude') is None:
@@ -247,22 +249,14 @@ def detail_view(activity_filename, read_only=False):
             st.success(f"Action '{action_text}' successful.")
             st.rerun()
 
-        def pause_action():
-            if not location or location.get('latitude') is None:
-                st.warning("Please share location to pause the activity."); return
-            
-            activity_data['properties']['status'] = 'Paused'
-            activity_data['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": user['username'], "action": "Work Paused"})
-            if 'location_trail' not in activity_data['properties']:
-                activity_data['properties']['location_trail'] = []
-            activity_data['properties']['location_trail'].append({"timestamp": datetime.now().isoformat(), "coordinates": [location['longitude'], location['latitude']]})
-
-            create_or_update_file(filepath, activity_data, sha, f"Paused by {user['username']}")
-            st.rerun()
-
         cols = st.columns(5)
         with cols[0]: st.button("Start", on_click=perform_action, args=('In Progress', 'Work Started'), disabled=(props['status'] != 'Pending' or not location))
-        with cols[1]: st.button("Pause", on_click=pause_action, disabled=(props['status'] != 'In Progress' or not location))
+        with cols[1]: 
+            if st.button("Pause", disabled=props['status'] != 'In Progress'):
+                activity_data['properties']['status'] = 'Paused'
+                activity_data['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": user['username'], "action": "Work Paused"})
+                create_or_update_file(filepath, activity_data, sha, f"Paused by {user['username']}")
+                st.rerun()
         with cols[2]: st.button("Resume", on_click=perform_action, args=('In Progress', 'Work Resumed'), disabled=(props['status'] != 'Paused' or not location))
         with cols[3]: st.button("Complete", on_click=perform_action, args=('Completed', 'Work Completed'), disabled=(props['status'] not in ['In Progress', 'Paused'] or not location))
         with cols[4]:
