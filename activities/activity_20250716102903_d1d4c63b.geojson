@@ -13,7 +13,7 @@
         "description": "test2\n",
         "vendor": "vendor@example.com",
         "site": "home",
-        "status": "Pending",
+        "status": "In Progress",
         "createdAt": "2025-07-16T10:29:03.800610",
         "geofence_center": [
             40.777018425251256,
@@ -25,8 +25,21 @@
                 "timestamp": "2025-07-16T10:29:03.800621",
                 "user": "admin",
                 "action": "Activity created."
+            },
+            {
+                "timestamp": "2025-07-16T10:29:18.064206",
+                "user": "admin",
+                "action": "Work Started"
             }
         ],
-        "location_trail": []
+        "location_trail": [
+            {
+                "timestamp": "2025-07-16T10:29:18.064221",
+                "coordinates": [
+                    -73.94867421110285,
+                    40.77712154496853
+                ]
+            }
+        ]
     }
 }
