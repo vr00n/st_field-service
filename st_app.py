@@ -191,12 +191,10 @@ def detail_view(activity_filename, read_only=False):
     logs = props.get('logs', [])
     user = st.session_state.get('logged_in_user', {"username": "Public", "role": "public"})
 
-    # Auto-refresh and periodic location tracking for "In Progress" status
     if props.get('status') == 'In Progress' and not read_only:
         st.html("<meta http-equiv='refresh' content='30'>")
-        location = streamlit_geolocation()
+        location = streamlit_geolocation(key=f"loc_tracker_{activity_filename}")
         if location and location.get('latitude') is not None:
-            # Check if last log was recent to avoid spamming on quick reloads
             last_log_time = datetime.fromisoformat(logs[-1]['timestamp']) if logs else datetime.min
             if (datetime.now() - last_log_time).total_seconds() > 25:
                 activity_data['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": "System", "action": "Periodic location check."})
@@ -224,7 +222,7 @@ def detail_view(activity_filename, read_only=False):
 
     if not read_only and user['role'] in ['admin', 'vendor']:
         st.subheader("Location & Actions")
-        location = streamlit_geolocation()
+        location = streamlit_geolocation(key=f"action_loc_{activity_filename}")
         
         def perform_action(new_status, action_text):
             if not location or location.get('latitude') is None:
@@ -250,7 +248,6 @@ def detail_view(activity_filename, read_only=False):
             st.rerun()
 
         def pause_action():
-            location = streamlit_geolocation(key=f"pause_loc_{activity_id}") # Use a unique key
             if not location or location.get('latitude') is None:
                 st.warning("Please share location to pause the activity."); return
             
@@ -265,7 +262,7 @@ def detail_view(activity_filename, read_only=False):
 
         cols = st.columns(5)
         with cols[0]: st.button("Start", on_click=perform_action, args=('In Progress', 'Work Started'), disabled=(props['status'] != 'Pending' or not location))
-        with cols[1]: st.button("Pause", on_click=pause_action, disabled=props['status'] != 'In Progress')
+        with cols[1]: st.button("Pause", on_click=pause_action, disabled=(props['status'] != 'In Progress' or not location))
         with cols[2]: st.button("Resume", on_click=perform_action, args=('In Progress', 'Work Resumed'), disabled=(props['status'] != 'Paused' or not location))
         with cols[3]: st.button("Complete", on_click=perform_action, args=('Completed', 'Work Completed'), disabled=(props['status'] not in ['In Progress', 'Paused'] or not location))
         with cols[4]:
