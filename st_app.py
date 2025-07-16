@@ -139,6 +139,8 @@ def activity_list_view():
         if item['name'].endswith('.geojson'):
             content, _ = get_file_content(item['path'])
             if content:
+                # Add the actual filename to the activity object
+                content['filename'] = item['name']
                 all_activities.append(content)
 
     if not all_activities:
@@ -171,19 +173,21 @@ def activity_list_view():
     st.subheader("Activity List")
     for activity in sorted(activities_to_show, key=lambda x: x.get('properties', {}).get('createdAt', ''), reverse=True):
         props = activity.get('properties', {})
+        # Use the filename as the key and for selection
+        if st.button("View Details", key=activity['filename']):
+            st.session_state['view'] = 'detail'
+            st.session_state['selected_activity_filename'] = activity['filename']
+            st.rerun()
         with st.container(border=True):
             col1, col2 = st.columns([3, 1])
             with col1: st.subheader(props.get('title', 'No Title'))
             with col2: st.info(props.get('status', 'Unknown'))
             st.write(f"**Vendor:** {props.get('vendor', 'N/A')}")
             st.write(f"**Site:** {props.get('site', 'N/A')}")
-            if st.button("View Details", key=activity['id']):
-                st.session_state['view'] = 'detail'
-                st.session_state['selected_activity_id'] = activity['id']
-                st.rerun()
+            
 
-def detail_view(activity_id, read_only=False):
-    filepath = f"{PATH_IN_REPO}/{activity_id}.geojson"
+def detail_view(activity_filename, read_only=False):
+    filepath = f"{PATH_IN_REPO}/{activity_filename}"
     activity_data, sha = get_file_content(filepath)
     if not activity_data:
         st.error("Activity not found or could not be loaded."); return
@@ -193,7 +197,7 @@ def detail_view(activity_id, read_only=False):
     user = st.session_state.get('logged_in_user', {"username": "Public", "role": "public"})
 
     st.title(props.get('title'))
-    if not read_only: st.caption(f"Activity ID: `{activity_id}`")
+    if not read_only: st.caption(f"Activity File: `{activity_filename}`")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -279,10 +283,12 @@ def create_activity_view():
         radius = st.number_input("Geofence Radius (meters)", value=500, min_value=50)
         
         if st.form_submit_button("Create Activity"):
-            activity_id = str(uuid.uuid4())
-            filepath = f"{PATH_IN_REPO}/{activity_id}.geojson"
+            # Use a more unique filename
+            filename = f"activity_{datetime.now().strftime('%Y%m%d%H%M%S')}_{str(uuid.uuid4())[:8]}.geojson"
+            filepath = f"{PATH_IN_REPO}/{filename}"
+            
             new_activity_data = {
-                "id": activity_id, "type": "Feature",
+                "id": str(uuid.uuid4()), "type": "Feature",
                 "geometry": {"type": "Point", "coordinates": [lon, lat]},
                 "properties": {
                     "title": title, "description": description, "vendor": vendor,
@@ -302,6 +308,7 @@ def main():
     # Check for shareable link parameter
     query_params = st.query_params
     if 'activity_id' in query_params:
+        # Note: For public links, we assume the activity_id is the filename
         detail_view(query_params['activity_id'], read_only=True)
         return
 
@@ -319,8 +326,8 @@ def main():
             st.header("Navigation")
             if st.button("🏠 Home / Activities List"):
                 st.session_state['view'] = 'list'
-                if 'selected_activity_id' in st.session_state:
-                    del st.session_state['selected_activity_id']
+                if 'selected_activity_filename' in st.session_state:
+                    del st.session_state['selected_activity_filename']
                 st.rerun()
             st.divider()
             if st.button("Logout"):
@@ -336,7 +343,7 @@ def main():
         if view == 'list':
             activity_list_view()
         elif view == 'detail':
-            detail_view(st.session_state['selected_activity_id'])
+            detail_view(st.session_state['selected_activity_filename'])
         elif view == 'create_activity':
             create_activity_view()
 
