@@ -166,15 +166,6 @@ def activity_list_view():
     if map_data:
         df = pd.DataFrame(map_data)
         
-        ICON_URL = "https://upload.wikimedia.org/wikipedia/commons/thumb/d/d1/Map_marker_icon_%E2%80%93_Nicolas_Mollet_%E2%80%93_Work.svg/1024px-Map_marker_icon_%E2%80%93_Nicolas_Mollet_%E2%80%93_Work.svg.png"
-        icon_data = {
-            "url": ICON_URL,
-            "width": 1024,
-            "height": 1024,
-            "anchorY": 1024,
-        }
-        df["icon_data"] = [icon_data] * len(df)
-
         view_state = pdk.ViewState(
             latitude=df["lat"].mean(),
             longitude=df["lon"].mean(),
@@ -182,14 +173,25 @@ def activity_list_view():
             pitch=45,
         )
 
-        icon_layer = pdk.Layer(
-            "IconLayer",
+        # Layer 1: A colored circle for the base of the pin
+        scatterplot_layer = pdk.Layer(
+            "ScatterplotLayer",
             data=df,
-            get_icon="icon_data",
             get_position='[lon, lat]',
-            get_size=4,
-            size_scale=15,
+            get_fill_color='[200, 30, 0, 160]',
+            get_radius=100,
             pickable=True,
+        )
+
+        # Layer 2: An emoji text character for the icon
+        text_layer = pdk.Layer(
+            "TextLayer",
+            data=df,
+            get_position='[lon, lat]',
+            get_text='"📍"',  # Map pin emoji
+            get_size=24,
+            get_color='[0, 0, 0]',
+            get_angle=0,
         )
 
         tooltip = {
@@ -200,7 +202,7 @@ def activity_list_view():
         deck = pdk.Deck(
             map_style=None, # Use default pydeck style, no key needed
             initial_view_state=view_state,
-            layers=[icon_layer],
+            layers=[scatterplot_layer, text_layer], # Render both layers
             tooltip=tooltip
         )
         st.pydeck_chart(deck)
