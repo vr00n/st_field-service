@@ -1,0 +1,32 @@
+{
+    "id": "04ee49ad-9bbc-41c2-a3d5-16fc669e3de1",
+    "type": "Feature",
+    "geometry": {
+        "type": "Point",
+        "coordinates": [
+            -73.9405917684788,
+            40.728178574620564
+        ]
+    },
+    "properties": {
+        "title": "Repair EV chargers at Greenpoint",
+        "description": "Repair EV chargers at Greenpoint\n",
+        "vendor": "vendor@example.com",
+        "site": "Greenpoint",
+        "status": "Pending",
+        "createdAt": "2025-07-16T16:41:33.529392",
+        "geofence_center": [
+            40.728178574620564,
+            -73.9405917684788
+        ],
+        "geofence_radius": 500,
+        "logs": [
+            {
+                "timestamp": "2025-07-16T16:41:33.529402",
+                "user": "admin",
+                "action": "Activity created."
+            }
+        ],
+        "location_trail": []
+    }
+}
