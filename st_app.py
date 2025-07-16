@@ -9,8 +9,7 @@ from streamlit_geolocation import streamlit_geolocation
 from math import radians, cos, sin, asin, sqrt
 
 # --- GitHub Configuration ---
-# These should be set as Streamlit secrets. For local development, you can
-# temporarily set them here and replace them with st.secrets["KEY"] for deployment.
+# These should be set as Streamlit secrets.
 try:
     GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
     REPO_OWNER = st.secrets["REPO_OWNER"]
@@ -35,12 +34,16 @@ HEADERS = {
 def get_repo_contents(path):
     """Fetches the contents of a directory in the GitHub repo."""
     url = f"{BASE_URL}{path}"
+    st.info(f"DEBUG: Fetching directory contents from: {url}") # Debugging line
     try:
         response = requests.get(url, headers=HEADERS)
         if response.status_code == 404:
-            return [] # Directory doesn't exist yet, return empty list
+            st.warning(f"DEBUG: Directory '{path}' not found in repo. This is normal if no activities have been created yet.")
+            return [] 
         response.raise_for_status()
-        return response.json()
+        contents = response.json()
+        st.success(f"DEBUG: Found {len(contents)} item(s) in '{path}'.") # Debugging line
+        return contents
     except requests.exceptions.RequestException as e:
         st.error(f"Failed to connect to GitHub: {e}")
         return None
@@ -131,7 +134,9 @@ def activity_list_view():
     user = st.session_state['logged_in_user']
     
     contents = get_repo_contents(PATH_IN_REPO)
-    if contents is None: return
+    if contents is None: 
+        st.error("Could not fetch activity list from GitHub. Check token permissions and repository path.")
+        return
 
     all_activities = []
     for item in contents:
@@ -139,6 +144,9 @@ def activity_list_view():
             content, _ = get_file_content(item['path'])
             if content:
                 all_activities.append(content)
+
+    if not all_activities:
+        st.warning("No activity files found in the repository path.")
 
     if user['role'] == 'vendor':
         activities_to_show = [act for act in all_activities if act.get('properties', {}).get('vendor') == user['username']]
@@ -295,6 +303,16 @@ def create_activity_view():
 def main():
     st.set_page_config(layout="wide")
     
+    # Debugging: Display current config from secrets
+    with st.sidebar:
+        st.header("Debug Info")
+        st.write(f"**Repo Owner:** `{REPO_OWNER}`")
+        st.write(f"**Repo Name:** `{REPO_NAME}`")
+        st.write(f"**Path in Repo:** `{PATH_IN_REPO}`")
+        token_display = GITHUB_TOKEN[:4] + "..." + GITHUB_TOKEN[-4:] if GITHUB_TOKEN != "YOUR_GITHUB_PERSONAL_ACCESS_TOKEN" else "Not Set"
+        st.write(f"**Token Loaded:** `{token_display}`")
+
+
     # Check for shareable link parameter
     query_params = st.query_params
     if 'activity_id' in query_params:
