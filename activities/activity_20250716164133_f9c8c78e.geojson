@@ -13,7 +13,7 @@
         "description": "Repair EV chargers at Greenpoint\n",
         "vendor": "vendor@example.com",
         "site": "Greenpoint",
-        "status": "In Progress",
+        "status": "Paused",
         "createdAt": "2025-07-16T16:41:33.529392",
         "geofence_center": [
             40.728178574620564,
@@ -35,6 +35,11 @@
                 "timestamp": "2025-07-16T16:45:36.092547",
                 "user": "System",
                 "action": "Periodic location check."
+            },
+            {
+                "timestamp": "2025-07-16T16:45:43.996922",
+                "user": "admin",
+                "action": "Work Paused"
             }
         ],
         "location_trail": [
