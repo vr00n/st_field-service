@@ -13,7 +13,7 @@
         "description": "test2\n",
         "vendor": "vendor@example.com",
         "site": "home",
-        "status": "Completed",
+        "status": "Verified",
         "createdAt": "2025-07-16T10:29:03.800610",
         "geofence_center": [
             40.777018425251256,
@@ -50,6 +50,11 @@
                 "timestamp": "2025-07-16T10:48:45.763555",
                 "user": "admin",
                 "action": "Work Completed"
+            },
+            {
+                "timestamp": "2025-07-16T10:48:51.012608",
+                "user": "admin",
+                "action": "Work Verified"
             }
         ],
         "location_trail": [
