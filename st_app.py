@@ -191,20 +191,6 @@ def detail_view(activity_filename, read_only=False):
     logs = props.get('logs', [])
     user = st.session_state.get('logged_in_user', {"username": "Public", "role": "public"})
 
-    if props.get('status') == 'In Progress' and not read_only:
-        st.html("<meta http-equiv='refresh' content='30'>")
-        # The location component is now called once here for the auto-refresh logic
-        location_tracker = streamlit_geolocation() 
-        if location_tracker and location_tracker.get('latitude') is not None:
-            last_log_time = datetime.fromisoformat(logs[-1]['timestamp']) if logs else datetime.min
-            if (datetime.now() - last_log_time).total_seconds() > 25:
-                activity_data['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": "System", "action": "Periodic location check."})
-                if 'location_trail' not in activity_data['properties']:
-                    activity_data['properties']['location_trail'] = []
-                activity_data['properties']['location_trail'].append({"timestamp": datetime.now().isoformat(), "coordinates": [location_tracker['longitude'], location_tracker['latitude']]})
-                create_or_update_file(filepath, activity_data, sha, "Periodic location update")
-                st.rerun()
-
     st.title(props.get('title'))
     if not read_only: st.caption(f"Activity File: `{activity_filename}`")
     
@@ -221,10 +207,24 @@ def detail_view(activity_filename, read_only=False):
     st.divider()
     st.header(f"Status: {props.get('status')}")
 
+    location = None
     if not read_only and user['role'] in ['admin', 'vendor']:
         st.subheader("Location & Actions")
-        # This is the single location component for user actions.
+        # This is the single location component for all actions on this page.
         location = streamlit_geolocation()
+
+        # Auto-refresh and periodic location tracking for "In Progress" status
+        if props.get('status') == 'In Progress':
+            st.html("<meta http-equiv='refresh' content='30'>")
+            if location and location.get('latitude') is not None:
+                last_log_time = datetime.fromisoformat(logs[-1]['timestamp']) if logs else datetime.min
+                if (datetime.now() - last_log_time).total_seconds() > 25:
+                    activity_data['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": "System", "action": "Periodic location check."})
+                    if 'location_trail' not in activity_data['properties']:
+                        activity_data['properties']['location_trail'] = []
+                    activity_data['properties']['location_trail'].append({"timestamp": datetime.now().isoformat(), "coordinates": [location['longitude'], location['latitude']]})
+                    create_or_update_file(filepath, activity_data, sha, "Periodic location update")
+                    st.rerun()
         
         def perform_action(new_status, action_text):
             if not location or location.get('latitude') is None:
