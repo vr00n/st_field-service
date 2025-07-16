@@ -1,112 +1,122 @@
 import streamlit as st
 import json
+import requests
+import base64
 from datetime import datetime, timedelta
 import uuid
 import pandas as pd
 from streamlit_geolocation import streamlit_geolocation
 from math import radians, cos, sin, asin, sqrt
 
-# --- Geofence Helper Function ---
-def haversine(lon1, lat1, lon2, lat2):
-    """
-    Calculate the great circle distance in meters between two points 
-    on the earth (specified in decimal degrees)
-    """
-    # convert decimal degrees to radians 
-    lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
+# --- GitHub Configuration ---
+# These should be set as Streamlit secrets. For local development, you can
+# temporarily set them here and replace them with st.secrets["KEY"] for deployment.
+try:
+    GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
+    REPO_OWNER = st.secrets["REPO_OWNER"]
+    REPO_NAME = st.secrets["REPO_NAME"]
+    PATH_IN_REPO = st.secrets["PATH_IN_REPO"]
+except (KeyError, AttributeError):
+    st.warning("GitHub credentials not found in Streamlit secrets. Using placeholders. Please configure secrets for deployment.")
+    GITHUB_TOKEN = "YOUR_GITHUB_PERSONAL_ACCESS_TOKEN"
+    REPO_OWNER = "YOUR_GITHUB_USERNAME"
+    REPO_NAME = "YOUR_GITHUB_REPO_NAME"
+    PATH_IN_REPO = "activities"
 
-    # haversine formula 
+
+# --- GitHub API Helper Functions ---
+BASE_URL = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/"
+HEADERS = {
+    "Authorization": f"token {GITHUB_TOKEN}",
+    "Accept": "application/vnd.github.v3+json"
+}
+
+@st.cache_data(ttl=60)
+def get_repo_contents(path):
+    """Fetches the contents of a directory in the GitHub repo."""
+    url = f"{BASE_URL}{path}"
+    try:
+        response = requests.get(url, headers=HEADERS)
+        if response.status_code == 404:
+            return [] # Directory doesn't exist yet, return empty list
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Failed to connect to GitHub: {e}")
+        return None
+
+@st.cache_data(ttl=60)
+def get_file_content(filepath):
+    """Fetches and decodes the content of a single file from GitHub."""
+    url = f"{BASE_URL}{filepath}"
+    try:
+        response = requests.get(url, headers=HEADERS)
+        if response.status_code == 404:
+            return None, None
+        response.raise_for_status()
+        data = response.json()
+        content = base64.b64decode(data['content']).decode('utf-8')
+        return json.loads(content), data['sha']
+    except requests.exceptions.RequestException as e:
+        st.error(f"Failed to read file from GitHub: {e}")
+        return None, None
+
+
+def create_or_update_file(filepath, content, sha=None, message="Update file"):
+    """Creates a new file or updates an existing one in the GitHub repo."""
+    url = f"{BASE_URL}{filepath}"
+    encoded_content = base64.b64encode(json.dumps(content, indent=4).encode('utf-8')).decode('utf-8')
+    
+    data = {
+        "message": f"{message} at {datetime.now().isoformat()}",
+        "content": encoded_content,
+        "committer": {"name": "Streamlit App", "email": "app@streamlit.io"}
+    }
+    if sha:
+        data["sha"] = sha
+
+    try:
+        response = requests.put(url, headers=HEADERS, data=json.dumps(data))
+        response.raise_for_status()
+        st.cache_data.clear() # Clear cache after writing
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Failed to write to GitHub: {e}")
+        return None
+
+# --- Geofence Helper ---
+def haversine(lon1, lat1, lon2, lat2):
+    lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
     dlon = lon2 - lon1 
     dlat = lat2 - lat1 
     a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
     c = 2 * asin(sqrt(a)) 
-    r = 6371 # Radius of earth in kilometers.
-    return c * r * 1000 # convert to meters
+    r = 6371 # Radius of earth in km
+    return c * r * 1000 # in meters
 
-# --- Initial Mock Data ---
-def get_initial_data():
-    """Returns the initial mock data for the session."""
-    now = datetime.now()
-    return {
-        "activities": [
-            {
-                "id": "activity-1",
-                "type": "Feature",
-                "geometry": {"type": "Point", "coordinates": [-73.844, 40.85]},
-                "properties": {
-                    "title": "Repair Charger #3 at Zerega",
-                    "description": "Charger is offline. Error code 501.",
-                    "vendor": "vendor@example.com",
-                    "site": "Zerega",
-                    "category": "Repair EV Charger",
-                    "status": "Pending",
-                    "createdAt": (now - timedelta(days=1)).isoformat(),
-                    "geofence_center": [40.85, -73.844], # lat, lon
-                    "geofence_radius": 500, # in meters
-                    "logs": [
-                        {
-                            "timestamp": (now - timedelta(days=1)).isoformat(),
-                            "user": "admin",
-                            "action": "Activity created."
-                        }
-                    ]
-                }
-            },
-            {
-                "id": "activity-2",
-                "type": "Feature",
-                "geometry": {"type": "Point", "coordinates": [-73.778, 40.641]},
-                "properties": {
-                    "title": "Install Camera on Bus 4501",
-                    "description": "Install new 360-degree camera system.",
-                    "vendor": "vendor@example.com",
-                    "site": "JFK Depot",
-                    "category": "Install Equipment",
-                    "status": "In Progress",
-                    "createdAt": (now - timedelta(days=2)).isoformat(),
-                    "geofence_center": [40.641, -73.778], # lat, lon
-                    "geofence_radius": 1000, # in meters
-                    "logs": [
-                         {
-                            "timestamp": (now - timedelta(days=2)).isoformat(),
-                            "user": "admin",
-                            "action": "Activity created."
-                        },
-                        {
-                            "timestamp": (now - timedelta(hours=1)).isoformat(),
-                            "user": "vendor@example.com",
-                            "action": "Work Started"
-                        }
-                    ]
-                }
-            }
-        ],
-        "users": {
-            "vendor@example.com": {"password": "password", "role": "vendor"}
-        }
-    }
+# --- Authentication & User Management ---
+@st.cache_data(ttl=300)
+def get_users():
+    content, _ = get_file_content("users.json")
+    return content if content else {"vendor@example.com": {"password": "password", "role": "vendor"}}
 
-# --- Authentication ---
 def check_password(username, password):
-    """Validates user credentials against session state data."""
     if username.lower() == 'admin' and password == 'admin':
         return {"username": "admin", "role": "admin"}
     
-    user_data = st.session_state.data['users'].get(username)
+    users_data = get_users()
+    user_data = users_data.get(username)
     if user_data and user_data['password'] == password:
         return {"username": username, "role": user_data['role']}
     return None
 
 def login_page():
-    """Renders the login form."""
     st.header("NYCSBUS Site Activity Tracker")
     st.subheader("Login")
-
     with st.form("login_form"):
-        username = st.text_input("Username or Email", help="Use `admin` / `admin` or `vendor@example.com` / `password`")
+        username = st.text_input("Username or Email", help="Use `admin` / `admin` or a vendor account.")
         password = st.text_input("Password", type="password")
         submitted = st.form_submit_button("Login")
-
         if submitted:
             user = check_password(username, password)
             if user:
@@ -115,32 +125,33 @@ def login_page():
             else:
                 st.error("Invalid username or password")
 
-# --- UI Components ---
+# --- UI Views ---
 def activity_list_view():
-    """Displays the list of all activities and the export button."""
     st.title("Site Activities")
-    
     user = st.session_state['logged_in_user']
-    activities = st.session_state.data['activities']
+    
+    contents = get_repo_contents(PATH_IN_REPO)
+    if contents is None: return
+
+    all_activities = []
+    for item in contents:
+        if item['name'].endswith('.geojson'):
+            content, _ = get_file_content(item['path'])
+            if content:
+                all_activities.append(content)
 
     if user['role'] == 'vendor':
-        activities_to_show = [act for act in activities if act.get('properties', {}).get('vendor') == user['username']]
+        activities_to_show = [act for act in all_activities if act.get('properties', {}).get('vendor') == user['username']]
     else:
-        activities_to_show = activities
+        activities_to_show = all_activities
 
+    # Map Display
     st.subheader("Activity Locations")
-    map_data = []
-    for activity in activities_to_show:
-        coords = activity.get("geometry", {}).get("coordinates")
-        if coords and len(coords) == 2:
-            map_data.append({"lon": coords[0], "lat": coords[1]})
-
+    map_data = [{"lon": act["geometry"]["coordinates"][0], "lat": act["geometry"]["coordinates"][1]} for act in activities_to_show if act.get("geometry", {}).get("coordinates")]
     if map_data:
-        df = pd.DataFrame(map_data)
-        st.map(df, zoom=10)
-    else:
-        st.info("No activities with valid locations to display.")
+        st.map(pd.DataFrame(map_data), zoom=10)
 
+    # Controls
     st.divider()
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -149,27 +160,17 @@ def activity_list_view():
                 st.session_state['view'] = 'create_activity'
                 st.rerun()
     with col2:
-        export_data = json.dumps(activities, indent=4)
-        st.download_button(
-            label="📥 Export All Activities",
-            data=export_data,
-            file_name=f"site_activities_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-            mime="application/json"
-        )
+        export_data = json.dumps(all_activities, indent=4)
+        st.download_button("📥 Export All Activities", export_data, f"activities_{datetime.now().strftime('%Y%m%d')}.json", "application/json")
 
+    # List
     st.subheader("Activity List")
-    if not activities_to_show:
-        st.info("No activities found for your user.")
-        return
-
     for activity in sorted(activities_to_show, key=lambda x: x.get('properties', {}).get('createdAt', ''), reverse=True):
         props = activity.get('properties', {})
         with st.container(border=True):
             col1, col2 = st.columns([3, 1])
-            with col1:
-                st.subheader(props.get('title', 'No Title'))
-            with col2:
-                st.info(props.get('status', 'Unknown'))
+            with col1: st.subheader(props.get('title', 'No Title'))
+            with col2: st.info(props.get('status', 'Unknown'))
             st.write(f"**Vendor:** {props.get('vendor', 'N/A')}")
             st.write(f"**Site:** {props.get('site', 'N/A')}")
             if st.button("View Details", key=activity['id']):
@@ -177,176 +178,132 @@ def activity_list_view():
                 st.session_state['selected_activity_id'] = activity['id']
                 st.rerun()
 
-def detail_view():
-    """Displays the details of a single activity."""
-    activity_id = st.session_state['selected_activity_id']
-    
-    activity_index = next((i for i, act in enumerate(st.session_state.data['activities']) if act['id'] == activity_id), None)
-    if activity_index is None:
-        st.error("Activity not found."); return
+def detail_view(activity_id, read_only=False):
+    filepath = f"{PATH_IN_REPO}/{activity_id}.geojson"
+    activity_data, sha = get_file_content(filepath)
+    if not activity_data:
+        st.error("Activity not found or could not be loaded."); return
 
-    activity_data = st.session_state.data['activities'][activity_index]
     props = activity_data.get('properties', {})
     logs = props.get('logs', [])
-    user = st.session_state['logged_in_user']
-    
-    st.title(props.get('title'))
-    st.caption(f"Activity ID: `{activity_id}`")
+    user = st.session_state.get('logged_in_user', {"username": "Public", "role": "public"})
 
+    st.title(props.get('title'))
+    if not read_only: st.caption(f"Activity ID: `{activity_id}`")
+    
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Details")
         st.write(f"**Vendor:** {props.get('vendor')}")
         st.write(f"**Site:** {props.get('site')}")
-        st.write(f"**Category:** {props.get('category')}")
         st.write(f"**Description:** {props.get('description')}")
-        st.write(f"**Geofence Radius:** {props.get('geofence_radius')} meters")
-
     with col2:
         coords = activity_data.get("geometry", {}).get("coordinates")
-        if coords and len(coords) == 2:
-            st.subheader("Location")
-            st.map(pd.DataFrame([{"lon": coords[0], "lat": coords[1]}]))
-        
+        if coords: st.map(pd.DataFrame([{"lon": coords[0], "lat": coords[1]}]))
+
     st.divider()
-    
     st.header(f"Status: {props.get('status')}")
-    
-    # --- Geofence and Action Logic ---
-    st.subheader("Location & Actions")
-    location = streamlit_geolocation()
-    
-    if user['role'] in ['admin', 'vendor']:
-        with st.container(border=True):
+
+    if not read_only and user['role'] in ['admin', 'vendor']:
+        st.subheader("Location & Actions")
+        location = streamlit_geolocation()
+        
+        def perform_action(new_status, action_text):
+            if not location or 'latitude' not in location:
+                st.warning("Please share location to perform actions."); return
             
-            def perform_action(new_status, action_text):
-                if not location or 'latitude' not in location or 'longitude' not in location:
-                    st.warning("Could not get a valid location. Please share your location using the button above to perform actions.")
-                    return
+            center = props.get('geofence_center')
+            radius = props.get('geofence_radius')
+            if not center or not radius:
+                st.error("Activity has no geofence defined."); return
 
-                center = props.get('geofence_center')
-                radius = props.get('geofence_radius')
-                if not center or not radius:
-                    st.error("This activity does not have a geofence defined.")
-                    return
-                
-                current_lat = location['latitude']
-                current_lon = location['longitude']
-                
-                if current_lat is None or current_lon is None:
-                    st.warning("Could not get a valid location. Please share your location using the button above to perform actions.")
-                    return
+            distance = haversine(location['longitude'], location['latitude'], center[1], center[0])
+            if distance > radius:
+                st.error(f"Action denied. You are {int(distance)}m away, outside the {radius}m geofence."); return
+            
+            activity_data['properties']['status'] = new_status
+            activity_data['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": user['username'], "action": action_text})
+            create_or_update_file(filepath, activity_data, sha, f"{action_text} by {user['username']}")
+            st.success(f"Action '{action_text}' successful.")
+            st.rerun()
 
-                distance = haversine(current_lon, current_lat, center[1], center[0])
-
-                if distance > radius:
-                    st.error(f"Action denied. You are {int(distance)}m away from the site, which is outside the {radius}m geofence.")
-                    return
-
-                st.session_state.data['activities'][activity_index]['properties']['status'] = new_status
-                st.session_state.data['activities'][activity_index]['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": user['username'], "action": action_text})
-                st.success(f"Action '{action_text}' successful. You are {int(distance)}m from the site center.")
+        cols = st.columns(5)
+        with cols[0]: st.button("Start", on_click=perform_action, args=('In Progress', 'Work Started'), disabled=props['status'] != 'Pending' or not location)
+        with cols[1]: 
+            if st.button("Pause", disabled=props['status'] != 'In Progress'):
+                activity_data['properties']['status'] = 'Paused'
+                activity_data['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": user['username'], "action": "Work Paused"})
+                create_or_update_file(filepath, activity_data, sha, f"Paused by {user['username']}")
                 st.rerun()
-
-            cols = st.columns(5)
-            with cols[0]:
-                st.button("Start", on_click=perform_action, args=('In Progress', 'Work Started'), disabled=props['status'] != 'Pending' or not location)
-            with cols[1]:
-                if st.button("Pause", disabled=props['status'] != 'In Progress'):
-                    st.session_state.data['activities'][activity_index]['properties']['status'] = 'Paused'
-                    st.session_state.data['activities'][activity_index]['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": user['username'], "action": "Work Paused"})
+        with cols[2]: st.button("Resume", on_click=perform_action, args=('In Progress', 'Work Resumed'), disabled=props['status'] != 'Paused' or not location)
+        with cols[3]: st.button("Complete", on_click=perform_action, args=('Completed', 'Work Completed'), disabled=props['status'] not in ['In Progress', 'Paused'] or not location)
+        with cols[4]:
+            if user['role'] == 'admin':
+                if st.button("Verify", disabled=props['status'] != 'Completed'):
+                    activity_data['properties']['status'] = 'Verified'
+                    activity_data['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": user['username'], "action": "Work Verified"})
+                    create_or_update_file(filepath, activity_data, sha, f"Verified by {user['username']}")
                     st.rerun()
-            with cols[2]:
-                 st.button("Resume", on_click=perform_action, args=('In Progress', 'Work Resumed'), disabled=props['status'] != 'Paused' or not location)
-            with cols[3]:
-                st.button("Complete", on_click=perform_action, args=('Completed', 'Work Completed'), disabled=props['status'] not in ['In Progress', 'Paused'] or not location)
-            with cols[4]:
-                if user['role'] == 'admin':
-                    if st.button("Verify", disabled=props['status'] != 'Completed'):
-                        st.session_state.data['activities'][activity_index]['properties']['status'] = 'Verified'
-                        st.session_state.data['activities'][activity_index]['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": user['username'], "action": "Work Verified"})
-                        st.rerun()
-    
+
     st.divider()
     st.subheader("Activity Log")
     if logs:
         log_df = pd.DataFrame(logs)
-        log_df['timestamp'] = pd.to_datetime(log_df['timestamp'], errors='coerce')
-        log_df.dropna(subset=['timestamp'], inplace=True)
+        log_df['timestamp'] = pd.to_datetime(log_df['timestamp'])
         st.dataframe(log_df.sort_values(by="timestamp", ascending=False), use_container_width=True, hide_index=True)
-    else:
-        st.write("No log entries yet.")
 
-    with st.form("comment_form"):
-        comment = st.text_area("Add a comment or note")
-        submitted = st.form_submit_button("Submit Comment")
-        if submitted and comment:
-            st.session_state.data['activities'][activity_index]['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": user['username'], "action": f"Comment: {comment}"})
-            st.rerun()
-
-    if st.button("Back to List"):
-        st.session_state['view'] = 'list'
-        st.rerun()
-
-def create_activity_view():
-    """Renders the form to create a new activity."""
-    st.title("Create New Site Activity")
-
-    with st.form("new_activity_form"):
-        title = st.text_input("Title")
-        description = st.text_area("Description")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            vendor_emails = list(st.session_state.data['users'].keys())
-            vendor = st.selectbox("Assign Vendor", options=vendor_emails)
-            site = st.text_input("Site / Location")
-            category = st.selectbox("Category", ["General Maintenance", "Repair EV Charger", "Install Equipment"])
-        with col2:
-            st.subheader("Geofence")
-            lat = st.number_input("Center Latitude", value=40.7128, format="%.6f")
-            lon = st.number_input("Center Longitude", value=-74.0060, format="%.6f")
-            radius = st.number_input("Radius (meters)", value=500, min_value=50, step=50)
-        
-        submitted = st.form_submit_button("Create Activity")
-        if submitted:
-            new_activity_data = {
-                "id": str(uuid.uuid4()),
-                "type": "Feature",
-                "geometry": {"type": "Point", "coordinates": [lon, lat]},
-                "properties": {
-                    "title": title,
-                    "description": description,
-                    "vendor": vendor,
-                    "site": site,
-                    "category": category,
-                    "status": "Pending",
-                    "createdAt": datetime.now().isoformat(),
-                    "geofence_center": [lat, lon],
-                    "geofence_radius": radius,
-                    "logs": [{"timestamp": datetime.now().isoformat(), "user": st.session_state['logged_in_user']['username'], "action": "Activity created."}]
-                }
-            }
-            st.session_state.data['activities'].append(new_activity_data)
-            st.success("Activity created successfully!")
+    if not read_only:
+        with st.form("comment_form"):
+            comment = st.text_area("Add a comment")
+            if st.form_submit_button("Submit Comment") and comment:
+                activity_data['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": user['username'], "action": f"Comment: {comment}"})
+                create_or_update_file(filepath, activity_data, sha, f"Comment by {user['username']}")
+                st.rerun()
+        if st.button("Back to List"):
             st.session_state['view'] = 'list'
             st.rerun()
 
-    if st.button("Cancel"):
-        st.session_state['view'] = 'list'
-        st.rerun()
+def create_activity_view():
+    st.title("Create New Site Activity")
+    with st.form("new_activity_form"):
+        title = st.text_input("Title")
+        description = st.text_area("Description")
+        vendor = st.selectbox("Assign Vendor", options=list(get_users().keys()))
+        site = st.text_input("Site / Location")
+        lat = st.number_input("Center Latitude", value=40.7128, format="%.6f")
+        lon = st.number_input("Center Longitude", value=-74.0060, format="%.6f")
+        radius = st.number_input("Geofence Radius (meters)", value=500, min_value=50)
+        
+        if st.form_submit_button("Create Activity"):
+            activity_id = str(uuid.uuid4())
+            filepath = f"{PATH_IN_REPO}/{activity_id}.geojson"
+            new_activity_data = {
+                "id": activity_id, "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                "properties": {
+                    "title": title, "description": description, "vendor": vendor,
+                    "site": site, "status": "Pending", "createdAt": datetime.now().isoformat(),
+                    "geofence_center": [lat, lon], "geofence_radius": radius,
+                    "logs": [{"timestamp": datetime.now().isoformat(), "user": st.session_state['logged_in_user']['username'], "action": "Activity created."}]
+                }
+            }
+            create_or_update_file(filepath, new_activity_data, message=f"Create {title}")
+            st.success("Activity created!"); st.session_state['view'] = 'list'; st.rerun()
+    if st.button("Cancel"): st.session_state['view'] = 'list'; st.rerun()
 
 # --- Main App Router ---
 def main():
-    """Main application router."""
     st.set_page_config(layout="wide")
+    
+    # Check for shareable link parameter
+    query_params = st.query_params
+    if 'activity_id' in query_params:
+        detail_view(query_params['activity_id'], read_only=True)
+        return
 
-    if 'data' not in st.session_state:
-        st.session_state['data'] = get_initial_data()
-    if 'logged_in_user' not in st.session_state:
-        st.session_state['logged_in_user'] = None
-    if 'view' not in st.session_state:
-        st.session_state['view'] = 'list'
+    # Standard login and view routing
+    if 'logged_in_user' not in st.session_state: st.session_state['logged_in_user'] = None
+    if 'view' not in st.session_state: st.session_state['view'] = 'list'
 
     if st.session_state.get('logged_in_user'):
         st.sidebar.header("User")
@@ -360,11 +317,12 @@ def main():
     if not st.session_state.get('logged_in_user'):
         login_page()
     else:
-        if st.session_state['view'] == 'list':
+        view = st.session_state.get('view', 'list')
+        if view == 'list':
             activity_list_view()
-        elif st.session_state['view'] == 'detail':
-            detail_view()
-        elif st.session_state['view'] == 'create_activity':
+        elif view == 'detail':
+            detail_view(st.session_state['selected_activity_id'])
+        elif view == 'create_activity':
             create_activity_view()
 
 if __name__ == "__main__":
