@@ -235,19 +235,15 @@ def activity_list_view():
     if table_data:
         df_table = pd.DataFrame(table_data)
         
-        # Use st.dataframe with on_select for interactivity
         selection = st.dataframe(
             df_table,
             on_select="rerun",
             selection_mode="single-row",
             hide_index=True,
-            column_order=("Status", "Title", "Vendor", "Site"), # Control column order
-            column_config={
-                "filename": None # Hide the filename column from view
-            }
+            column_order=("Status", "Title", "Vendor", "Site"),
+            column_config={"filename": None}
         )
 
-        # Handle row selection
         if selection.selection['rows']:
             selected_row_index = selection.selection['rows'][0]
             selected_filename = df_table.iloc[selected_row_index]['filename']
@@ -266,19 +262,6 @@ def detail_view(activity_filename, read_only=False):
     logs = props.get('logs', [])
     user = st.session_state.get('logged_in_user', {"username": "Public", "role": "public"})
 
-    if props.get('status') == 'In Progress' and not read_only:
-        st.html("<meta http-equiv='refresh' content='30'>")
-        location = streamlit_geolocation()
-        if location and location.get('latitude') is not None:
-            last_log_time = datetime.fromisoformat(logs[-1]['timestamp']) if logs else datetime.min
-            if (datetime.now() - last_log_time).total_seconds() > 25:
-                activity_data['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": "System", "action": "Periodic location check."})
-                if 'location_trail' not in activity_data['properties']:
-                    activity_data['properties']['location_trail'] = []
-                activity_data['properties']['location_trail'].append({"timestamp": datetime.now().isoformat(), "coordinates": [location['longitude'], location['latitude']]})
-                create_or_update_file(filepath, activity_data, sha, "Periodic location update")
-                st.rerun()
-
     st.title(props.get('title'))
     if not read_only: st.caption(f"Activity File: `{activity_filename}`")
     
@@ -295,9 +278,23 @@ def detail_view(activity_filename, read_only=False):
     st.divider()
     st.header(f"Status: {props.get('status')}")
 
+    location = None
     if not read_only and user['role'] in ['admin', 'vendor']:
         st.subheader("Location & Actions")
+        # This is now the single source for location data on this page.
         location = streamlit_geolocation()
+
+        if props.get('status') == 'In Progress':
+            st.html("<meta http-equiv='refresh' content='30'>")
+            if location and location.get('latitude') is not None:
+                last_log_time = datetime.fromisoformat(logs[-1]['timestamp']) if logs else datetime.min
+                if (datetime.now() - last_log_time).total_seconds() > 25:
+                    activity_data['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": "System", "action": "Periodic location check."})
+                    if 'location_trail' not in activity_data['properties']:
+                        activity_data['properties']['location_trail'] = []
+                    activity_data['properties']['location_trail'].append({"timestamp": datetime.now().isoformat(), "coordinates": [location['longitude'], location['latitude']]})
+                    create_or_update_file(filepath, activity_data, sha, "Periodic location update")
+                    st.rerun()
         
         def perform_action(new_status, action_text):
             if not location or location.get('latitude') is None:
