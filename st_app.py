@@ -34,16 +34,12 @@ HEADERS = {
 def get_repo_contents(path):
     """Fetches the contents of a directory in the GitHub repo."""
     url = f"{BASE_URL}{path}"
-    st.info(f"DEBUG: Fetching directory contents from: {url}") # Debugging line
     try:
         response = requests.get(url, headers=HEADERS)
         if response.status_code == 404:
-            st.warning(f"DEBUG: Directory '{path}' not found in repo. This is normal if no activities have been created yet.")
-            return [] 
+            return [] # Directory doesn't exist yet, return empty list
         response.raise_for_status()
-        contents = response.json()
-        st.success(f"DEBUG: Found {len(contents)} item(s) in '{path}'.") # Debugging line
-        return contents
+        return response.json()
     except requests.exceptions.RequestException as e:
         st.error(f"Failed to connect to GitHub: {e}")
         return None
@@ -146,7 +142,7 @@ def activity_list_view():
                 all_activities.append(content)
 
     if not all_activities:
-        st.warning("No activity files found in the repository path.")
+        st.info("No activity files found in the repository path.")
 
     if user['role'] == 'vendor':
         activities_to_show = [act for act in all_activities if act.get('properties', {}).get('vendor') == user['username']]
@@ -243,105 +239,4 @@ def detail_view(activity_id, read_only=False):
                 activity_data['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": user['username'], "action": "Work Paused"})
                 create_or_update_file(filepath, activity_data, sha, f"Paused by {user['username']}")
                 st.rerun()
-        with cols[2]: st.button("Resume", on_click=perform_action, args=('In Progress', 'Work Resumed'), disabled=props['status'] != 'Paused' or not location)
-        with cols[3]: st.button("Complete", on_click=perform_action, args=('Completed', 'Work Completed'), disabled=props['status'] not in ['In Progress', 'Paused'] or not location)
-        with cols[4]:
-            if user['role'] == 'admin':
-                if st.button("Verify", disabled=props['status'] != 'Completed'):
-                    activity_data['properties']['status'] = 'Verified'
-                    activity_data['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": user['username'], "action": "Work Verified"})
-                    create_or_update_file(filepath, activity_data, sha, f"Verified by {user['username']}")
-                    st.rerun()
-
-    st.divider()
-    st.subheader("Activity Log")
-    if logs:
-        log_df = pd.DataFrame(logs)
-        log_df['timestamp'] = pd.to_datetime(log_df['timestamp'])
-        st.dataframe(log_df.sort_values(by="timestamp", ascending=False), use_container_width=True, hide_index=True)
-
-    if not read_only:
-        with st.form("comment_form"):
-            comment = st.text_area("Add a comment")
-            if st.form_submit_button("Submit Comment") and comment:
-                activity_data['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": user['username'], "action": f"Comment: {comment}"})
-                create_or_update_file(filepath, activity_data, sha, f"Comment by {user['username']}")
-                st.rerun()
-        if st.button("Back to List"):
-            st.session_state['view'] = 'list'
-            st.rerun()
-
-def create_activity_view():
-    st.title("Create New Site Activity")
-    with st.form("new_activity_form"):
-        title = st.text_input("Title")
-        description = st.text_area("Description")
-        vendor = st.selectbox("Assign Vendor", options=list(get_users().keys()))
-        site = st.text_input("Site / Location")
-        lat = st.number_input("Center Latitude", value=40.7128, format="%.6f")
-        lon = st.number_input("Center Longitude", value=-74.0060, format="%.6f")
-        radius = st.number_input("Geofence Radius (meters)", value=500, min_value=50)
-        
-        if st.form_submit_button("Create Activity"):
-            activity_id = str(uuid.uuid4())
-            filepath = f"{PATH_IN_REPO}/{activity_id}.geojson"
-            new_activity_data = {
-                "id": activity_id, "type": "Feature",
-                "geometry": {"type": "Point", "coordinates": [lon, lat]},
-                "properties": {
-                    "title": title, "description": description, "vendor": vendor,
-                    "site": site, "status": "Pending", "createdAt": datetime.now().isoformat(),
-                    "geofence_center": [lat, lon], "geofence_radius": radius,
-                    "logs": [{"timestamp": datetime.now().isoformat(), "user": st.session_state['logged_in_user']['username'], "action": "Activity created."}]
-                }
-            }
-            create_or_update_file(filepath, new_activity_data, message=f"Create {title}")
-            st.success("Activity created!"); st.session_state['view'] = 'list'; st.rerun()
-    if st.button("Cancel"): st.session_state['view'] = 'list'; st.rerun()
-
-# --- Main App Router ---
-def main():
-    st.set_page_config(layout="wide")
-    
-    # Debugging: Display current config from secrets
-    with st.sidebar:
-        st.header("Debug Info")
-        st.write(f"**Repo Owner:** `{REPO_OWNER}`")
-        st.write(f"**Repo Name:** `{REPO_NAME}`")
-        st.write(f"**Path in Repo:** `{PATH_IN_REPO}`")
-        token_display = GITHUB_TOKEN[:4] + "..." + GITHUB_TOKEN[-4:] if GITHUB_TOKEN != "YOUR_GITHUB_PERSONAL_ACCESS_TOKEN" else "Not Set"
-        st.write(f"**Token Loaded:** `{token_display}`")
-
-
-    # Check for shareable link parameter
-    query_params = st.query_params
-    if 'activity_id' in query_params:
-        detail_view(query_params['activity_id'], read_only=True)
-        return
-
-    # Standard login and view routing
-    if 'logged_in_user' not in st.session_state: st.session_state['logged_in_user'] = None
-    if 'view' not in st.session_state: st.session_state['view'] = 'list'
-
-    if st.session_state.get('logged_in_user'):
-        st.sidebar.header("User")
-        st.sidebar.write(f"Welcome, **{st.session_state['logged_in_user']['username']}**!")
-        st.sidebar.write(f"Role: `{st.session_state['logged_in_user']['role']}`")
-        if st.sidebar.button("Logout"):
-            st.session_state['logged_in_user'] = None
-            st.session_state['view'] = 'list'
-            st.rerun()
-    
-    if not st.session_state.get('logged_in_user'):
-        login_page()
-    else:
-        view = st.session_state.get('view', 'list')
-        if view == 'list':
-            activity_list_view()
-        elif view == 'detail':
-            detail_view(st.session_state['selected_activity_id'])
-        elif view == 'create_activity':
-            create_activity_view()
-
-if __name__ == "__main__":
-    main()
+        with cols[2]: st.button("Resume", on_click=perform_action, args=('In Progress', 'Work Resumed'), disabled=props['status'] != 'Paused' or 
