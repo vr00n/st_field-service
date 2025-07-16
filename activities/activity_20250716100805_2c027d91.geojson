@@ -25,6 +25,11 @@
                 "timestamp": "2025-07-16T10:08:05.490659",
                 "user": "admin",
                 "action": "Activity created."
+            },
+            {
+                "timestamp": "2025-07-16T10:10:15.537425",
+                "user": "admin",
+                "action": "Comment: test"
             }
         ]
     }
