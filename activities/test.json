@@ -1,1 +1,31 @@
-test
+{
+    "id": "activity-07162025-1",
+    "type": "Feature",
+    "geometry": {
+        "type": "Point",
+        "coordinates": [
+            -73.9962,
+            40.7302
+        ]
+    },
+    "properties": {
+        "title": "Inspect Rooftop HVAC Unit 2",
+        "description": "Unit is making a loud rattling noise. Please inspect the fan blades and motor mountings. Access keys are at the front desk.",
+        "vendor": "vendor@example.com",
+        "site": "East 14th St Depot",
+        "status": "Pending",
+        "createdAt": "2025-07-16T09:45:00Z",
+        "geofence_center": [
+            40.7302,
+            -73.9962
+        ],
+        "geofence_radius": 300,
+        "logs": [
+            {
+                "timestamp": "2025-07-16T09:45:00Z",
+                "user": "admin",
+                "action": "Activity created."
+            }
+        ]
+    }
+}
