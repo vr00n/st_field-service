@@ -384,18 +384,61 @@ def main():
             st.write(f"Welcome, **{st.session_state['logged_in_user']['username']}**!")
             st.write(f"Role: `{st.session_state['logged_in_user']['role']}`")
             st.divider()
+            
             st.header("Navigation")
             if st.button("🏠 Home / Activities List"):
                 st.session_state['view'] = 'list'
                 if 'selected_activity_filename' in st.session_state:
                     del st.session_state['selected_activity_filename']
                 st.rerun()
+
+            if st.button("❔ Quick Start Guide"):
+                st.session_state.show_guide = True
+
             st.divider()
             if st.button("Logout"):
                 st.session_state['logged_in_user'] = None
                 st.session_state['view'] = 'list'
                 st.rerun()
     
+    # --- Quick Start Guide Dialog ---
+    if st.session_state.get('show_guide', False):
+        @st.dialog("Quick Start Guide")
+        def show_guide():
+            st.markdown("""
+            ### Welcome to the NYCSBUS Site Activity Tracker!
+
+            This guide will help you get started with the app's main features.
+
+            #### **1. Logging In**
+            - **Admin:** Use `admin` / `admin` to log in with full permissions.
+            - **Vendor:** Use the credentials provided by an admin (e.g., `vendor@example.com` / `password`).
+
+            #### **2. Main Dashboard (Home)**
+            - **Map View:** See all site activities at a glance. Icons are clustered together on zoom.
+            - **Activity List:** A filterable list of all activities. Click "View Details" to see more.
+            - **Create Activity (Admin Only):** Click the "Create New Activity" button to start a new work order.
+            - **Export Data:** Click "Export All Activities" to download a JSON file of all current data.
+
+            #### **3. Activity Details**
+            - **Actions:** As a vendor or admin, you can update the status of a job.
+            - **Geofence:** To **Start**, **Resume**, or **Complete** a job, you must be within the defined geofence radius.
+              1. Click the **"Share location"** button. Your browser will ask for permission.
+              2. Once your location is shared, the action buttons will become active.
+              3. Click the desired action (e.g., "Start").
+            - **In Progress Tracking:** While a job is "In Progress", the app will automatically log your location every 30 seconds.
+            - **Comments:** Add comments or notes to the activity log at any time.
+
+            #### **4. Shareable Links**
+            - To share a read-only view of an activity, simply copy the URL from your browser when you are on the detail page and send it to anyone. They will not need to log in to view it.
+            """)
+            if st.button("Close"):
+                st.session_state.show_guide = False
+                st.rerun()
+        show_guide()
+
+
+    # Main content router
     if not st.session_state.get('logged_in_user'):
         login_page()
     else:
