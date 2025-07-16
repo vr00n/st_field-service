@@ -13,7 +13,7 @@
         "description": "The main breaker for the 5th-floor server room has tripped multiple times. Please replace the 200A breaker with the new unit provided. The new breaker is in the facility manager's office.",
         "vendor": "vendor@example.com",
         "site": "Empire State Building",
-        "status": "In Progress",
+        "status": "Paused",
         "createdAt": "2025-07-16T08:00:00Z",
         "geofence_center": [
             40.7484,
@@ -40,6 +40,11 @@
                 "timestamp": "2025-07-16T09:35:00Z",
                 "user": "System",
                 "action": "Periodic location check."
+            },
+            {
+                "timestamp": "2025-07-16T11:22:04.772773",
+                "user": "admin",
+                "action": "Work Paused"
             }
         ],
         "location_trail": [
