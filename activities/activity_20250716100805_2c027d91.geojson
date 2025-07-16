@@ -13,7 +13,7 @@
         "description": "test, ",
         "vendor": "vendor@example.com",
         "site": "401e86",
-        "status": "In Progress",
+        "status": "Paused",
         "createdAt": "2025-07-16T10:08:05.490653",
         "geofence_center": [
             40.77708341778832,
@@ -35,6 +35,11 @@
                 "timestamp": "2025-07-16T10:16:13.830374",
                 "user": "admin",
                 "action": "Work Started"
+            },
+            {
+                "timestamp": "2025-07-16T10:16:31.339978",
+                "user": "admin",
+                "action": "Work Paused"
             }
         ]
     }
