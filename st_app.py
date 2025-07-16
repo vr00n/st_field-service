@@ -139,7 +139,6 @@ def activity_list_view():
         if item['name'].endswith('.geojson'):
             content, _ = get_file_content(item['path'])
             if content:
-                # Add the actual filename to the activity object
                 content['filename'] = item['name']
                 all_activities.append(content)
 
@@ -151,13 +150,11 @@ def activity_list_view():
     else:
         activities_to_show = all_activities
 
-    # Map Display
     st.subheader("Activity Locations")
     map_data = [{"lon": act["geometry"]["coordinates"][0], "lat": act["geometry"]["coordinates"][1]} for act in activities_to_show if act.get("geometry", {}).get("coordinates")]
     if map_data:
         st.map(pd.DataFrame(map_data), zoom=10)
 
-    # Controls
     st.divider()
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -169,7 +166,6 @@ def activity_list_view():
         export_data = json.dumps(all_activities, indent=4)
         st.download_button("📥 Export All Activities", export_data, f"activities_{datetime.now().strftime('%Y%m%d')}.json", "application/json")
 
-    # List
     st.subheader("Activity List")
     for activity in sorted(activities_to_show, key=lambda x: x.get('properties', {}).get('createdAt', ''), reverse=True):
         props = activity.get('properties', {})
@@ -195,6 +191,21 @@ def detail_view(activity_filename, read_only=False):
     logs = props.get('logs', [])
     user = st.session_state.get('logged_in_user', {"username": "Public", "role": "public"})
 
+    # Auto-refresh and periodic location tracking for "In Progress" status
+    if props.get('status') == 'In Progress' and not read_only:
+        st.html("<meta http-equiv='refresh' content='30'>")
+        location = streamlit_geolocation()
+        if location and location.get('latitude') is not None:
+            # Check if last log was recent to avoid spamming on quick reloads
+            last_log_time = datetime.fromisoformat(logs[-1]['timestamp']) if logs else datetime.min
+            if (datetime.now() - last_log_time).total_seconds() > 25:
+                activity_data['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": "System", "action": "Periodic location check."})
+                if 'location_trail' not in activity_data['properties']:
+                    activity_data['properties']['location_trail'] = []
+                activity_data['properties']['location_trail'].append({"timestamp": datetime.now().isoformat(), "coordinates": [location['longitude'], location['latitude']]})
+                create_or_update_file(filepath, activity_data, sha, "Periodic location update")
+                st.rerun()
+
     st.title(props.get('title'))
     if not read_only: st.caption(f"Activity File: `{activity_filename}`")
     
@@ -216,9 +227,8 @@ def detail_view(activity_filename, read_only=False):
         location = streamlit_geolocation()
         
         def perform_action(new_status, action_text):
-            if not location or location.get('latitude') is None or location.get('longitude') is None:
-                st.warning("Could not get a valid location. Please share your location using the button above and try again.")
-                return
+            if not location or location.get('latitude') is None:
+                st.warning("Please share location to perform actions."); return
             
             center = props.get('geofence_center')
             radius = props.get('geofence_radius')
@@ -231,18 +241,31 @@ def detail_view(activity_filename, read_only=False):
             
             activity_data['properties']['status'] = new_status
             activity_data['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": user['username'], "action": action_text})
+            if 'location_trail' not in activity_data['properties']:
+                activity_data['properties']['location_trail'] = []
+            activity_data['properties']['location_trail'].append({"timestamp": datetime.now().isoformat(), "coordinates": [location['longitude'], location['latitude']]})
+
             create_or_update_file(filepath, activity_data, sha, f"{action_text} by {user['username']}")
             st.success(f"Action '{action_text}' successful.")
             st.rerun()
 
+        def pause_action():
+            location = streamlit_geolocation(key=f"pause_loc_{activity_id}") # Use a unique key
+            if not location or location.get('latitude') is None:
+                st.warning("Please share location to pause the activity."); return
+            
+            activity_data['properties']['status'] = 'Paused'
+            activity_data['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": user['username'], "action": "Work Paused"})
+            if 'location_trail' not in activity_data['properties']:
+                activity_data['properties']['location_trail'] = []
+            activity_data['properties']['location_trail'].append({"timestamp": datetime.now().isoformat(), "coordinates": [location['longitude'], location['latitude']]})
+
+            create_or_update_file(filepath, activity_data, sha, f"Paused by {user['username']}")
+            st.rerun()
+
         cols = st.columns(5)
         with cols[0]: st.button("Start", on_click=perform_action, args=('In Progress', 'Work Started'), disabled=(props['status'] != 'Pending' or not location))
-        with cols[1]: 
-            if st.button("Pause", disabled=props['status'] != 'In Progress'):
-                activity_data['properties']['status'] = 'Paused'
-                activity_data['properties']['logs'].append({"timestamp": datetime.now().isoformat(), "user": user['username'], "action": "Work Paused"})
-                create_or_update_file(filepath, activity_data, sha, f"Paused by {user['username']}")
-                st.rerun()
+        with cols[1]: st.button("Pause", on_click=pause_action, disabled=props['status'] != 'In Progress')
         with cols[2]: st.button("Resume", on_click=perform_action, args=('In Progress', 'Work Resumed'), disabled=(props['status'] != 'Paused' or not location))
         with cols[3]: st.button("Complete", on_click=perform_action, args=('Completed', 'Work Completed'), disabled=(props['status'] not in ['In Progress', 'Paused'] or not location))
         with cols[4]:
@@ -283,7 +306,6 @@ def create_activity_view():
         radius = st.number_input("Geofence Radius (meters)", value=500, min_value=50)
         
         if st.form_submit_button("Create Activity"):
-            # Use a more unique filename
             filename = f"activity_{datetime.now().strftime('%Y%m%d%H%M%S')}_{str(uuid.uuid4())[:8]}.geojson"
             filepath = f"{PATH_IN_REPO}/{filename}"
             
@@ -294,7 +316,8 @@ def create_activity_view():
                     "title": title, "description": description, "vendor": vendor,
                     "site": site, "status": "Pending", "createdAt": datetime.now().isoformat(),
                     "geofence_center": [lat, lon], "geofence_radius": radius,
-                    "logs": [{"timestamp": datetime.now().isoformat(), "user": st.session_state['logged_in_user']['username'], "action": "Activity created."}]
+                    "logs": [{"timestamp": datetime.now().isoformat(), "user": st.session_state['logged_in_user']['username'], "action": "Activity created."}],
+                    "location_trail": []
                 }
             }
             create_or_update_file(filepath, new_activity_data, message=f"Create {title}")
@@ -305,18 +328,14 @@ def create_activity_view():
 def main():
     st.set_page_config(layout="wide")
     
-    # Check for shareable link parameter
     query_params = st.query_params
     if 'activity_id' in query_params:
-        # Note: For public links, we assume the activity_id is the filename
         detail_view(query_params['activity_id'], read_only=True)
         return
 
-    # Initialize session state
     if 'logged_in_user' not in st.session_state: st.session_state['logged_in_user'] = None
     if 'view' not in st.session_state: st.session_state['view'] = 'list'
 
-    # Sidebar Navigation
     if st.session_state.get('logged_in_user'):
         with st.sidebar:
             st.header("User")
@@ -335,7 +354,6 @@ def main():
                 st.session_state['view'] = 'list'
                 st.rerun()
     
-    # Main content router
     if not st.session_state.get('logged_in_user'):
         login_page()
     else:
