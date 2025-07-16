@@ -30,6 +30,11 @@
                 "timestamp": "2025-07-16T10:29:18.064206",
                 "user": "admin",
                 "action": "Work Started"
+            },
+            {
+                "timestamp": "2025-07-16T10:47:07.355426",
+                "user": "System",
+                "action": "Periodic location check."
             }
         ],
         "location_trail": [
@@ -38,6 +43,13 @@
                 "coordinates": [
                     -73.94867421110285,
                     40.77712154496853
+                ]
+            },
+            {
+                "timestamp": "2025-07-16T10:47:07.355433",
+                "coordinates": [
+                    -73.94882426149621,
+                    40.7770308447359
                 ]
             }
         ]
